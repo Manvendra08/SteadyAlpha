@@ -1,34 +1,30 @@
-# SteadyAlpha — Requirements
+# SteadyAlpha — Requirements (Single-User Trading Copilot)
 
-## Foundation (Phase 0)
-- **REQ-001:** Repository structure must follow the engine boundaries defined in the roadmap.
-- **REQ-002:** GitHub Actions, Supabase, and Vercel must be configured with correct secrets and deployment paths.
-- **REQ-003:** `run_registry` table must track `trigger_type`, `status`, `code_version`, and `config_snapshot`.
-- **REQ-004:** Pipeline health must be visible via a UI banner driven by a `pipeline_health` table.
-- **REQ-005:** Base frontend shell must load and display basic run status.
-- **REQ-006:** Configuration must be centralized in `/config` directory (YAML/JSON).
+## Phase 1: Data Reliability & Signal Engines
+- **REQ-101:** Data sources must have a documented hierarchy and validation (freshness, nulls, sanity).
+- **REQ-102:** Regime engine must confirm state changes only after 2 consecutive days of confirmation (hysteresis).
+- **REQ-103:** Flows engine must incorporate FII/DII net, PCR percentile, and Sector RS.
+- **REQ-104:** Leadership engine must use Z-score normalized RS slope (20d) for ranking F&O 200 universe.
+- **REQ-105:** `signals_summary` must provide a single-row snapshot of all engine outputs.
 
-## Data Reliability (Phase 1)
-- **REQ-010:** Data sources must have a documented hierarchy and fallback logic.
-- **REQ-011:** Validation rules must classify data as `fresh`, `stale`, `degraded`, or `missing`.
-- **REQ-012:** `engine_audit` must store `input_digest`, `output_digest`, and `warnings` for every engine run.
-- **REQ-013:** Raw input snapshots must be persisted to enable deterministic replay.
+## Phase 2: Signal Dashboard & Advisor
+- **REQ-201:** UI must provide dedicated cards for Regime, Flows, Leadership, and Risk.
+- **REQ-202:** AI Advisor must synthesize engine outputs into Action recommendations with confidence scores.
+- **REQ-203:** Dashboard must highlight delta (changes) in signals since the previous run.
 
-## Signal Engines (Phase 2)
-- **REQ-020:** Regime engine must confirm state changes only after 2 consecutive days of confirmation.
-- **REQ-021:** Flows engine must incorporate FII/DII net, PCR percentile, and Sector RS.
-- **REQ-022:** Leadership engine must use Z-score normalized RS slope (20d) for ranking F&O 200 universe.
-- **REQ-023:** `signals_summary` must provide a single-row snapshot for frontend subscription.
+## Phase 3: Automated Paper Execution
+- **REQ-301:** `paper_orders` and `paper_trades` tables must track tool-generated trade lifecycle.
+- **REQ-302:** Promotion logic must gate paper trades by regime, confidence, and risk state.
+- **REQ-303:** UI must allow inspection of every paper trade including its source signal and sizing basis.
 
-## Risk & Advisor (Phase 3)
-- **REQ-030:** Risk engine must include ATR-based sizing and circuit breakers (1.5% intraday / 6% peak drawdown).
-- **REQ-031:** AI Advisor must synthesize engine outputs into Action recommendations (LONG, SHORT, NO_TRADE).
-- **REQ-032:** UI must include cards for Regime, Flows, Leadership, Risk, Advisor, and Health.
+## Phase 4: Performance Review & Broker Hardening
+- **REQ-401:** Performance metrics must be segmented by regime, setup type, and confidence bucket.
+- **REQ-402:** Broker adapter must be architecturally isolated from signal generation logic.
+- **REQ-403:** System must implement a hardware/software kill switch and max daily loss guardrails.
 
-## Replay & Human Workflow (Phase 4)
-- **REQ-040:** Replay must be deterministic by loading stored config snapshots and data.
-- **REQ-041:** UI must allow selecting historical dates to reconstruct signal states.
-- **REQ-042:** Users must be able to tag symbols as `watch`, `stalking`, or `ignored` within the app.
+## Phase 5: Constrained Live Automation
+- **REQ-501:** System must support assisted-live mode (manual approval) and constrained live-auto mode.
+- **REQ-502:** UI must show real-time broker execution events and P&L for live positions.
 
 ---
 *Last updated: 2026-04-25*
