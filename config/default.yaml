@@ -1,0 +1,6 @@
+universe: F&O 200
+regime:
+  hysteresis_days: 2
+risk:
+  base_risk_pct: 0.75
+  drawdown_limit_pct: 6.0
