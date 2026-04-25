@@ -15,13 +15,13 @@ Goal: Build a reliable signal engine and validate it through automated paper tra
 - Leadership Engine: RS-based ranking [REQ-104]
 - Signals Summary: Aggregated row persistence [REQ-105]
 
-### Phase 2: Signal Dashboard & Advisor
+### Phase 2: Signal Dashboard & Advisor [COMPLETE]
 **Objective:** Create the operator console for signal review.
 - UI Cards: Regime, Flows, Leadership, Risk [REQ-201]
 - Advisor Layer: Weighted voting and reasoning [REQ-202]
 - Change Tracking: "What changed since last run" visibility [REQ-203]
 
-### Phase 3: Automated Paper Execution
+### Phase 3: Automated Paper Execution [ACTIVE]
 **Objective:** Tool-generated paper trades from qualified signals.
 - Paper Trade Tables: Orders and Trades [REQ-301]
 - Promotion Rules: Recommendation to paper order [REQ-302]

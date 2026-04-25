@@ -16,11 +16,19 @@ import json
 from pathlib import Path
 from dataclasses import asdict
 
-from persist import register_run, update_run_status, update_health
+from persist import (
+    register_run,
+    update_run_status,
+    update_health,
+    create_paper_order,
+    create_paper_trade,
+)
 from validate import validate_freshness, compute_digest, DataHealth
 from engines.regime import compute_regime, RegimeState
 from engines.flows import compute_flows
 from engines.leadership import rank_universe
+from engines.advisor import compute_advice
+from engines.promotion import evaluate_promotion
 
 
 def load_config_snapshot() -> dict:
@@ -102,6 +110,64 @@ def main():
 
     try:
         signals = run_engines(config_snapshot)
+
+        default_cfg = config_snapshot.get("default.yaml", {})
+        risk_cfg = default_cfg.get("risk", {})
+        paper_cfg = default_cfg.get("paper_execution", {})
+
+        advisor = compute_advice(
+            regime_state=signals["regime_state"],
+            regime_changed=signals["regime_changed"],
+            flows_bias=signals["flows_bias"],
+            pcr_percentile=signals["pcr_percentile"],
+        )
+
+        symbol = paper_cfg.get("default_symbol", "NIFTY")
+        risk_halt = False
+        risk_pct = float(risk_cfg.get("base_risk_pct", 0.75))
+
+        promotion = evaluate_promotion(
+            regime_state=signals["regime_state"],
+            recommendation=advisor.recommendation,
+            confidence=advisor.confidence,
+            risk_halt=risk_halt,
+            risk_pct=risk_pct,
+            paper_config=paper_cfg,
+        )
+
+        direction = advisor.recommendation if advisor.recommendation in ("LONG", "SHORT") else "LONG"
+        paper_order_id = create_paper_order(
+            run_id=run_id,
+            source_signal_key=f"{run_id}:advisor",
+            symbol=symbol,
+            direction=direction,
+            requested_qty=promotion.requested_qty,
+            confidence_at_entry=advisor.confidence,
+            risk_pct=promotion.risk_pct,
+            sizing_basis=promotion.sizing_basis,
+            status=promotion.status,
+            rejection_reason=promotion.rejection_reason,
+        )
+
+        if promotion.status == "pending":
+            create_paper_trade(
+                run_id=run_id,
+                paper_order_id=paper_order_id,
+                symbol=symbol,
+                direction=direction,
+                qty=promotion.requested_qty,
+                simulation_version=paper_cfg.get("simulation_version", "v1"),
+                entry_price=float(paper_cfg.get("assumed_entry_price", 100.0)),
+                slippage_bps=float(paper_cfg.get("default_slippage_bps", 5.0)),
+                status="open",
+            )
+
+        print(
+            "Promotion decision: "
+            f"status={promotion.status}, "
+            f"reason={promotion.rejection_reason}, "
+            f"qty={promotion.requested_qty}"
+        )
 
         # Log engine audit digests
         input_digest = compute_digest(config_snapshot)

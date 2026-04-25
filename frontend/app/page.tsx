@@ -6,6 +6,9 @@ import LeadershipCard from '../components/LeadershipCard';
 import RiskCard from '../components/RiskCard';
 import AdvisorCard from '../components/AdvisorCard';
 import ChangeTracker from '../components/ChangeTracker';
+import PaperOrdersTable from '../components/PaperOrdersTable';
+import OpenPaperTradesTable from '../components/OpenPaperTradesTable';
+import ClosedPaperTradesTable from '../components/ClosedPaperTradesTable';
 
 // Mock signal data — will be replaced by Supabase subscription
 const mockSignals = {
@@ -26,6 +29,55 @@ const mockSignals = {
   changes: [
     { field: 'Flows Bias', previous: 'neutral', current: 'bullish' },
     { field: 'PCR %ile', previous: '52nd', current: '75th' },
+  ],
+  paperOrders: [
+    {
+      id: 'po-001',
+      symbol: 'NIFTY',
+      direction: 'LONG' as const,
+      status: 'pending' as const,
+      sourceSignalKey: 'run-001:advisor',
+      confidenceAtEntry: 68,
+      requestedQty: 500,
+      sizingBasisLabel: 'risk_pct=0.75, sl=1.5%',
+    },
+    {
+      id: 'po-002',
+      symbol: 'BANKNIFTY',
+      direction: 'SHORT' as const,
+      status: 'rejected' as const,
+      sourceSignalKey: 'run-001:advisor',
+      confidenceAtEntry: 48,
+      requestedQty: 0,
+      sizingBasisLabel: 'not_applicable',
+      rejectionReason: 'confidence_below_threshold',
+    },
+  ],
+  openPaperTrades: [
+    {
+      id: 'pt-open-001',
+      symbol: 'NIFTY',
+      direction: 'LONG' as const,
+      qty: 500,
+      entryPrice: 22350.5,
+      slippageBps: 5,
+      entryAt: new Date().toISOString(),
+      simulationVersion: 'v1',
+    },
+  ],
+  closedPaperTrades: [
+    {
+      id: 'pt-closed-001',
+      symbol: 'RELIANCE',
+      direction: 'LONG' as const,
+      qty: 120,
+      entryPrice: 2875.0,
+      exitPrice: 2928.2,
+      pnl: 6384,
+      entryAt: new Date(Date.now() - 1000 * 60 * 60 * 26).toISOString(),
+      exitAt: new Date(Date.now() - 1000 * 60 * 40).toISOString(),
+      exitReason: 'target_hit',
+    },
   ],
   lastRunTs: new Date().toISOString(),
 };
@@ -51,7 +103,7 @@ export default function Home() {
             SteadyAlpha Console
           </h1>
           <span style={{ color: '#718096', fontSize: '13px' }}>
-            Stage 1 — Signal Engine & Dashboard
+            Stage 2 — Automated Paper Execution
           </span>
         </div>
 
@@ -75,6 +127,13 @@ export default function Home() {
 
         {/* Change Tracker */}
         <ChangeTracker changes={s.changes} lastRunTs={s.lastRunTs} />
+
+        <div style={{ height: '16px' }} />
+
+        {/* Paper Execution */}
+        <PaperOrdersTable orders={s.paperOrders} />
+        <OpenPaperTradesTable trades={s.openPaperTrades} />
+        <ClosedPaperTradesTable trades={s.closedPaperTrades} />
       </div>
     </main>
   );

@@ -1,6 +1,83 @@
-universe: F&O 200
+# SteadyAlpha Configuration
+# Spec Section 8
+
+universe: "NIFTY500"
+
+# --- Regime Engine ---
 regime:
+  trend_weights:
+    ema_dist: 0.4
+    ema_slope: 0.3
+    ema_align: 0.3
+  trend_thresholds:
+    bull: 0.5
+    bear: -0.5
+  vix_thresholds:
+    high: 20.0
+    extreme: 30.0
+  breadth_thresholds:
+    bull: 0.6
+    bear: 0.4
   hysteresis_days: 2
+
+# --- Flows Engine ---
+flows:
+  fii_lookback: 126
+  pcr_lookback: 63
+  pcr_smooth_window: 5
+  rs_spread_lookback: 126
+  weights:
+    fii: 0.4
+    pcr: 0.3
+    rs_spread: 0.3
+
+# --- Leadership Engine ---
+leadership:
+  rs_lookback: 60
+  vol_lookback: 63
+  breakout_lookback: 126
+  score_weights:
+    rs: 0.5
+    vol: 0.25
+    breakout: 0.25
+  quintile_thresholds:
+    q1: 0.8
+    q5: 0.2
+  filters:
+    sma50_above: true
+    sma200_above: true
+    earnings_blackout_days: 3
+
+# --- Risk Engine ---
 risk:
-  base_risk_pct: 0.75
-  drawdown_limit_pct: 6.0
+  base_risk_pct: 1.0
+  atr_lookback: 14
+  max_portfolio_risk_pct: 6.0
+  max_single_name_risk_pct: 1.5
+  circuit_breaker:
+    drawdown_limit_pct: 10.0
+    lookback_days: 20
+
+# --- Advisor ---
+advisor:
+  weights:
+    regime: 0.45
+    flows: 0.30
+    leadership: 0.25
+  confidence_adjustments:
+    conflict_penalty: 0.2
+    low_data_penalty: 0.3
+
+# --- Paper Execution (Phase 3) ---
+paper_execution:
+  tradable_regimes:
+    - bullish
+    - bearish
+  min_confidence: 60
+  require_risk_halt_false: true
+  reference_capital: 1000000
+  assumed_entry_price: 100
+  stop_loss_pct: 1.5
+  default_slippage_bps: 5
+  simulation_version: v1
+  default_symbol: NIFTY
