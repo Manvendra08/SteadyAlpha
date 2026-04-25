@@ -8,7 +8,6 @@ to the benchmark; laggards have negative.
 
 from dataclasses import dataclass
 import numpy as np
-from scipy import stats
 
 
 @dataclass
@@ -83,9 +82,14 @@ def rank_universe(
     symbols = [s[0] for s in slopes]
     slope_values = np.array([s[1] for s in slopes])
 
-    # Z-score normalization
+    # Z-score normalization (manual — no scipy dependency)
     if len(slope_values) > 1:
-        z_scores = stats.zscore(slope_values)
+        mean = np.mean(slope_values)
+        std = np.std(slope_values, ddof=0)
+        if std > 0:
+            z_scores = (slope_values - mean) / std
+        else:
+            z_scores = np.zeros_like(slope_values)
     else:
         z_scores = np.array([0.0])
 
