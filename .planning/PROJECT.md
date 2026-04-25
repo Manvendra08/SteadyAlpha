@@ -12,10 +12,9 @@ SteadyAlpha is a staged market-intelligence and trading simulation system design
 ## Target Audience
 Individual traders/operators seeking a reliable, data-driven decision-support system.
 
-## Status: Initializing Stage 0
-- Repository structure aligned to engine boundaries.
-- Environment setup for GitHub Actions, Supabase, and Vercel.
-- Operational foundations: run tracking, failure visibility, and basic frontend.
+## Status: Phase 0 Complete
+- Phase 0: Foundation and Operating Model completed. Basic infrastructure, run registration schema, and Next.js shell implemented.
+- Current active stage: Stage 1 (Data Reliability Layer).
 
 ## Technical Stack
 - **Compute:** GitHub Actions (Python pipeline)
@@ -24,4 +23,4 @@ Individual traders/operators seeking a reliable, data-driven decision-support sy
 - **Logic:** Custom Python engines for Regime, Flows, Leadership, and Risk.
 
 ---
-*Last updated: 2026-04-25 via GSD Initialization*
+*Last updated: 2026-04-25 via GSD Execution*
