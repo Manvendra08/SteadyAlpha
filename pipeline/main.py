@@ -22,6 +22,8 @@ from persist import (
     update_health,
     create_paper_order,
     create_paper_trade,
+    log_engine_audit,
+    upsert_signals_summary,
 )
 from validate import validate_freshness, compute_digest, DataHealth
 from engines.regime import compute_regime, RegimeState
@@ -172,9 +174,11 @@ def main():
         # Log engine audit digests
         input_digest = compute_digest(config_snapshot)
         output_digest = compute_digest(signals)
+        log_engine_audit(run_id, input_digest, output_digest, signals)
         print(f"Engine audit: input={input_digest}, output={output_digest}")
 
         # Log signals summary
+        upsert_signals_summary(run_id, signals)
         print(f"Signals summary: {json.dumps(signals, indent=2)}")
 
         update_run_status(run_id, "success")
