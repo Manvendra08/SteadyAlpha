@@ -1,67 +1,90 @@
 """
-Source hierarchy management for SteadyAlpha data ingestion.
+SteadyAlpha Data Sources Manager
+Spec Section 7: Data Ingestion & Hierarchy
 
-Each dataset has a primary and optional secondary source.
-If the primary source fails or returns stale data, the system
-falls back to the secondary source automatically.
+Responsibilities:
+1. Define data source hierarchy (Primary -> Secondary -> Tertiary).
+2. Manage API keys and connections.
+3. Provide fallback logic if primary source fails.
 """
 
-from enum import Enum
-from dataclasses import dataclass, field
-from typing import Optional, Callable, Any
+import os
+from typing import Dict, Any, Optional
+import pandas as pd
 
+class SourceManager:
+    def __init__(self):
+        # Define priorities
+        self.sources = {
+            'price_data': ['polygon', 'yahoo', 'alpha_vantage'],
+            'fii_data': ['nse_api', 'moneycontrol_scraper'],
+            'options_data': ['sensibull', 'nse_api'],
+            'vix_data': ['yahoo', 'polygon']
+        }
+        
+        # API Keys (Load from env)
+        self.keys = {
+            'polygon': os.getenv('POLYGON_API_KEY'),
+            'alpha_vantage': os.getenv('AV_API_KEY'),
+            'sensibull': os.getenv('SENSIBULL_KEY')
+        }
 
-class SourceStatus(Enum):
-    AVAILABLE = "available"
-    UNAVAILABLE = "unavailable"
-    STALE = "stale"
-
-
-@dataclass
-class DataSource:
-    """Represents a single data source with its fetch function."""
-    name: str
-    fetch: Callable[..., Any]
-    status: SourceStatus = SourceStatus.AVAILABLE
-
-
-@dataclass
-class SourceHierarchy:
-    """
-    Manages a ranked list of sources for a given dataset.
-    Falls back through the list until a usable source is found.
-    """
-    dataset_id: str
-    sources: list[DataSource] = field(default_factory=list)
-
-    def add_source(self, source: DataSource) -> None:
-        self.sources.append(source)
-
-    def get_best_source(self) -> Optional[DataSource]:
-        """Return the first available source in hierarchy order."""
-        for source in self.sources:
-            if source.status == SourceStatus.AVAILABLE:
-                return source
-        return None
-
-    def fetch_data(self, **kwargs) -> tuple[Any, str]:
-        """
-        Attempt to fetch data from sources in priority order.
-        Returns (data, source_name) tuple.
-        Raises RuntimeError if all sources fail.
-        """
-        errors = []
-        for source in self.sources:
-            if source.status == SourceStatus.UNAVAILABLE:
-                continue
+    def get_price_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """Fetch price data with fallback."""
+        for source in self.sources['price_data']:
             try:
-                data = source.fetch(**kwargs)
-                return data, source.name
+                if source == 'polygon':
+                    df = self._fetch_polygon(symbol, start_date, end_date)
+                elif source == 'yahoo':
+                    df = self._fetch_yahoo(symbol, start_date, end_date)
+                elif source == 'alpha_vantage':
+                    df = self._fetch_av(symbol, start_date, end_date)
+                
+                if not df.empty:
+                    return df
+                else:
+                    print(f"Source {source} returned empty data for {symbol}, trying next...")
             except Exception as e:
-                source.status = SourceStatus.UNAVAILABLE
-                errors.append(f"{source.name}: {e}")
+                print(f"Source {source} failed for {symbol}: {e}")
+                continue
+        
+        raise RuntimeError(f"All price sources failed for {symbol}")
 
-        raise RuntimeError(
-            f"All sources failed for '{self.dataset_id}': "
-            + "; ".join(errors)
-        )
+    def _fetch_polygon(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        # Placeholder for Polygon API logic
+        print(f"Fetching {symbol} from Polygon...")
+        return pd.DataFrame()
+
+    def _fetch_yahoo(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        # Placeholder for Yahoo Finance logic
+        print(f"Fetching {symbol} from Yahoo...")
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(start=start, end=end)
+        return df
+
+    def _fetch_av(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        # Placeholder for Alpha Vantage logic
+        print(f"Fetching {symbol} from Alpha Vantage...")
+        return pd.DataFrame()
+
+    def get_fii_data(self, start_date: str, end_date: str) -> pd.Series:
+        """Fetch FII flows."""
+        for source in self.sources['fii_data']:
+            try:
+                if source == 'nse_api':
+                    return self._fetch_nse_fii(start_date, end_date)
+                elif source == 'moneycontrol_scraper':
+                    return self._fetch_moneycontrol_fii(start_date, end_date)
+            except Exception as e:
+                print(f"Source {source} failed for FII: {e}")
+                continue
+        return pd.Series()
+
+    def _fetch_nse_fii(self, start: str, end: str) -> pd.Series:
+        print("Fetching FII from NSE...")
+        return pd.Series()
+
+    def _fetch_moneycontrol_fii(self, start: str, end: str) -> pd.Series:
+        print("Fetching FII from Moneycontrol...")
+        return pd.Series()

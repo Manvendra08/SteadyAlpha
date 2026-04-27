@@ -29,3 +29,14 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Ingestion Cache
+pipeline/.fetch_cache/
+
+# DB Temp
+supabase/.temp/
+
+# Scratch
+scratch/
+.minimax/
+.agent/

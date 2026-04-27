@@ -3,7 +3,7 @@
 
 CREATE TABLE paper_orders (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  run_id                UUID NOT NULL REFERENCES run_registry(run_id),
+  run_id                UUID NOT NULL REFERENCES runs(id),
   source_signal_key     TEXT NOT NULL,
   source_engine         TEXT NOT NULL DEFAULT 'advisor',
   symbol                TEXT NOT NULL,

@@ -1,83 +1,152 @@
 # SteadyAlpha Configuration
-# Spec Section 8
+# Spec Section 10
+# v0.6.1 Professional
 
 universe: "NIFTY500"
 
 # --- Regime Engine ---
+# Section 2 & 10.1
 regime:
-  trend_weights:
-    ema_dist: 0.4
-    ema_slope: 0.3
-    ema_align: 0.3
-  trend_thresholds:
-    bull: 0.5
-    bear: -0.5
-  vix_thresholds:
-    high: 20.0
-    extreme: 30.0
-  breadth_thresholds:
-    bull: 0.6
-    bear: 0.4
-  hysteresis_days: 2
+  # trend_score soft-cap scales (pct distance)
+  ts_d20_scale: 0.05
+  ts_d50_scale: 0.10
+  ts_d200_scale: 0.20
+  # EMA slope scales
+  ts_slope20_scale: 0.005
+  ts_slope50_scale: 0.002
+
+  # Classification thresholds
+  min_adx_trend: 25
+  max_adx_range: 25
+  min_trend_score: 3
+  max_ts_range: 3
+  min_bullish_breadth: 55
+  max_bearish_breadth: 45
+  range_breadth_low: 40
+  range_breadth_high: 60
+
+  # HIGH_VOL modifier
+  high_vol_vix_abs: 20
+  high_vol_vix_pct: 75
+
+  # Hysteresis
+  min_confirm_days: 2
 
 # --- Flows Engine ---
+# Section 3 & 10.2
 flows:
+  fii_z_strong: 1.0
+  pcr_high_pct: 80
+  pcr_low_pct: 20
+  bias_threshold: 1.25
+  min_sector_rs_spread: 0.010
+  pcr_smooth_window: 3
   fii_lookback: 126
-  pcr_lookback: 63
-  pcr_smooth_window: 5
-  rs_spread_lookback: 126
-  weights:
-    fii: 0.4
-    pcr: 0.3
-    rs_spread: 0.3
+  pcr_lookback: 252
+  rs_spread_lookback: 20
 
 # --- Leadership Engine ---
+# Section 4 & 10.3
 leadership:
-  rs_lookback: 60
-  vol_lookback: 63
-  breakout_lookback: 126
-  score_weights:
-    rs: 0.5
-    vol: 0.25
-    breakout: 0.25
-  quintile_thresholds:
-    q1: 0.8
-    q5: 0.2
-  filters:
-    sma50_above: true
-    sma200_above: true
-    earnings_blackout_days: 3
+  w_rs_slope: 0.55
+  w_volume_ratio: 0.25
+  w_breakout: 0.20
+  min_volume_ratio: 1.2
+  min_turnover_inr: 50000000
+  earnings_blackout_days: 5
+  rs_lookback: 20
+  vol_lookback: 20
+  breakout_lookback: 20
+  zscore_clip: 3.0
 
 # --- Risk Engine ---
+# Section 5 & 10.4
 risk:
-  base_risk_pct: 1.0
-  atr_lookback: 14
-  max_portfolio_risk_pct: 6.0
-  max_single_name_risk_pct: 1.5
-  circuit_breaker:
-    drawdown_limit_pct: 10.0
-    lookback_days: 20
+  account_risk_pct: 0.75
+  atr_multiplier: 1.5
+  max_stop_pct: 0.04
+  max_position_size: 10000
+  halt_session_loss_pct: 1.5
+  halt_drawdown_pct: 6.0
+  reduce_session_loss_pct: 1.0
+  reduce_drawdown_pct: 4.0
+  reduce_loss_streak: 3
+  max_open_positions: 6
+  max_sector_concentration_pct: 40
+  corp_action_days: 2
 
-# --- Advisor ---
+# --- Decision Aggregator ---
+# Section 6 & 10.5
 advisor:
-  weights:
-    regime: 0.45
-    flows: 0.30
-    leadership: 0.25
-  confidence_adjustments:
-    conflict_penalty: 0.2
-    low_data_penalty: 0.3
+  w_regime: 0.45
+  w_flows: 0.30
+  w_leadership: 0.25
+  min_leaders_for_vote: 3
+  confidence_full: 0.65
+  confidence_small: 0.50
+  max_recommendations: 5
 
-# --- Paper Execution (Phase 3) ---
+# --- Backtest Defaults ---
+# Section 9
+backtest:
+  stop_loss_multiplier: 1.5
+  target_multiplier: 2.0
+  max_holding_days: 10
+  slippage_bps: 10
+  commission_per_lot: 200
+
+# --- Paper Execution (v0.6.1) ---
 paper_execution:
-  tradable_regimes:
-    - bullish
-    - bearish
-  min_confidence: 60
-  require_risk_halt_false: true
-  reference_capital: 1000000
-  assumed_entry_price: 100
+  tradable_regimes: ["BULLISH", "BEARISH", "VOLATILE_TREND"]
+  min_confidence: 60.0
+  require_risk_halt_false: True
+  reference_capital: 1000000.0
+  assumed_entry_price: 22500.0 # NIFTY proxy
   stop_loss_pct: 1.5
-  default_slippage_bps: 5
-  simulation_version: v1
-  default_symbol: NIFTY
+
+# --- Ingestion & Fallback Architecture (v0.7.0) ---
+# Controls data source ladder behaviour, freshness thresholds, and sandbox mode.
+ingestion:
+  # Sandbox mode: set via env STEADYALPHA_SANDBOX_MODE=true
+  # When true: run_validity always NO, paper promotion blocked, all synthetic → SIMULATED
+  sandbox_mode_env_key: "STEADYALPHA_SANDBOX_MODE"
+
+  # Adapter retry policy
+  retry:
+    max_attempts: 3
+    base_delay_sec: 1.0
+    timeout_sec: 20
+
+  # Freshness thresholds — max age of cached snapshot before it is rejected
+  freshness_ttl_hours:
+    nifty_ohlcv:    24    # 1 trading day
+    india_vix:      24
+    fii_flows:      24
+    dii_flows:      48
+    pcr_oi:         12    # options chain stale faster
+    options_chain:  12
+    sector_indices: 24
+    universe_ohlcv: 24
+    equity_curve:   1     # must be near-realtime
+
+  # Coverage thresholds — engines DEGRADE below these
+  coverage:
+    universe_min_symbols_pct: 0.50   # 50% of universe must have valid OHLCV
+    universe_min_rows: 20            # minimum trading days of history
+
+  # Critical datasets — MISSING any of these → run_validity=NO
+  critical_for_decision:
+    - nifty_ohlcv
+    - india_vix
+    - fii_flows
+    - pcr_oi
+    - universe_ohlcv
+
+  critical_for_risk:
+    - equity_curve
+
+  # Non-critical — degrade but don't invalidate
+  important_noncritical:
+    - dii_flows
+    - sector_indices
+    - options_chain

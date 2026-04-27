@@ -1,0 +1,137 @@
+export type EngineStatus = 'READY' | 'DEGRADED' | 'SUPPRESSED' | 'WAITING' | 'FAILED';
+
+export type DashboardViewModel = {
+  systemStatus: 'HEALTHY' | 'DEGRADED' | 'FAILED';
+  operatingMode: 'SIGNAL_ONLY' | 'PAPER' | 'ASSISTED_LIVE' | 'LIVE_AUTO';
+  lastSuccessTs: string;
+  dataFreshness: 'FRESH' | 'STALE' | 'FALLBACK' | 'MISSING';
+  riskMode: 'ACTIVE' | 'REDUCED' | 'HALTED';
+  degradedReason?: string | null;
+
+  regime: {
+    state: 'TREND_UP' | 'TREND_DOWN' | 'RANGE_BOUND' | 'TRANSITION' | 'HIGH_VIX' | 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    confidencePct: number;
+    trendScore: number;
+    adx: number;
+    vix: number;
+    vixPercentile: number;
+    breadthPct: number;
+    hysteresisState: 'CONFIRMED' | 'WAITING';
+    engineStatus: EngineStatus;
+    dependency: string;
+    impact: string;
+    warning?: string | null;
+  };
+
+  flows: {
+    bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    fii5dNet: number | null;
+    dii5dNet: number | null;
+    pcrOi: number | null;
+    maxPain: number | null;
+    spotVsMaxPainPct: number | null;
+    sectorAlignment: 'ALIGNED' | 'CONFLICTED' | 'NEUTRAL' | 'UNKNOWN';
+    freshness: 'FRESH' | 'STALE' | 'FALLBACK' | 'MISSING';
+    biasDrivers: string[];
+    engineStatus: EngineStatus;
+    dependency: string;
+    impact: string;
+    warning?: string | null;
+  };
+
+  leadership: {
+    status: 'READY' | 'WAITING_FOR_BATCH' | 'COVERAGE_TOO_LOW' | 'SUPPRESSED' | 'DATA_MISSING';
+    universeCoverage: number | null;
+    qualifiedLeaderCount: number;
+    qualifiedLaggardCount: number;
+    leaders: { symbol: string; score: number; sector?: string }[];
+    laggards: { symbol: string; score: number; sector?: string }[];
+    statusReason: string;
+    engineStatus: EngineStatus;
+    dependency: string;
+    impact: string;
+    warning?: string | null;
+  };
+
+  risk: {
+    mode: 'ACTIVE' | 'REDUCED' | 'HALTED';
+    baseRiskPct: number;
+    drawdownPct: number;
+    drawdownLimitPct: number;
+    positionSize?: number | null;
+    triggerReason?: string | null;
+    consecutiveLossDays?: number | null;
+    engineStatus: EngineStatus;
+    dependency: string;
+    impact: string;
+    warning?: string | null;
+  };
+
+  decision: {
+    label: 'NO_TRADE' | 'WATCHLIST' | 'LONG_BIAS' | 'SHORT_BIAS' | 'PAPER_ELIGIBLE';
+    confidencePct: number;
+    regimeGate: 'PASS' | 'FAIL';
+    flowGate: 'PASS' | 'FAIL';
+    leadershipGate: 'PASS' | 'FAIL';
+    riskGate: 'PASS' | 'FAIL';
+    reasons: string[];
+    conflicts: string[];
+  };
+
+  changes: {
+    material: boolean;
+    items: string[];
+    asOfTs: string;
+  };
+
+  paperActions: {
+    symbol: string;
+    setupType: string;
+    direction: 'LONG' | 'SHORT';
+    decision: 'OPENED' | 'REJECTED' | 'SKIPPED' | 'CLOSED' | 'PENDING';
+    confidencePct: number | null;
+    qty: number | null;
+    riskGate: 'PASS' | 'FAIL' | 'N/A';
+    source: 'DECISION_ENGINE' | 'MANUAL' | 'BROKER_RETRY';
+    reason: string;
+    ts: string;
+    rawId: string;
+  }[];
+
+  paperActionEmptyReason?: string | null;
+
+  diagnostics: {
+    runId: string;
+    durationMs: number;
+    pipelineVersion: string;
+    triggerType?: string | null;
+    sourceRegistry: {
+      datasetKey: string;
+      datasetLabel: string;
+      provider: string;
+      scope: string;
+      marketDate: string | null;
+      fetchedAt: string | null;
+      freshness: 'FRESH' | 'STALE' | 'FALLBACK' | 'MISSING';
+      recordCount: number | null;
+      usedIn: string;
+      status: 'loaded' | 'fallback' | 'failed' | 'cached' | 'skipped';
+      note: string | null;
+    }[];
+    validationChecks: {
+      label: string;
+      result: 'PASS' | 'FAIL' | 'WARN';
+      note?: string | null;
+    }[];
+    engineWarnings: string[];
+    rawDataPreviews: {
+      label: string;
+      provider: string;
+      fetchedAt: string | null;
+      marketDate: string | null;
+      recordCount: number | null;
+      rows: Record<string, unknown>[];
+      usedInRun: boolean;
+    }[];
+  };
+};

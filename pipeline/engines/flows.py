@@ -1,128 +1,188 @@
 """
-Flows Engine — Institutional, Options, and Sector flow analysis.
+SteadyAlpha Flows Engine
+Spec Section 2: Institutional Flows & Sentiment
 
-Aggregates:
-  - FII/DII net flows (buy - sell)
-  - PCR (Put-Call Ratio) percentile ranking
-  - Sector Relative Strength vs Nifty 50
+Responsibilities:
+1. Calculate FII 5-day net flow Z-score.
+2. Calculate PCR (Put-Call Ratio) smoothed percentile.
+3. Calculate Sector Relative Strength (RS) spread.
+4. Compute weighted flows_score.
+5. Output flows state to flows_history and signals_summary.
 """
 
-from dataclasses import dataclass
-from typing import Optional
+import yaml
 import numpy as np
+import pandas as pd
+from datetime import datetime, timezone
+from typing import Dict, Any, List, Optional
 
+class FlowsEngine:
+    def __init__(self, config_path: str = "config/default.yaml"):
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            self.config = config.get('flows', {})
+        
+        self.fii_lookback = self.config.get('fii_lookback', 126)
+        self.pcr_lookback = self.config.get('pcr_lookback', 63)
+        self.pcr_smooth_window = self.config.get('pcr_smooth_window', 5)
+        self.rs_spread_lookback = self.config.get('rs_spread_lookback', 126)
+        self.weights = self.config.get('weights', {'fii': 0.35, 'dii': 0.15, 'pcr': 0.25, 'rs_spread': 0.25})
 
-@dataclass
-class FlowsResult:
-    fii_net: float
-    dii_net: float
-    institutional_bias: str  # "net_buy" | "net_sell" | "neutral"
-    pcr_value: float
-    pcr_percentile: float
-    sector_rs: dict[str, float]  # sector_name -> RS value
-    overall_bias: str  # "bullish" | "bearish" | "neutral"
+    def calculate_fii_zscore(self, fii_net_flows: pd.Series) -> float:
+        """
+        Calculate Z-score of 5-day rolling sum of FII flows over lookback period.
+        """
+        if fii_net_flows.empty or len(fii_net_flows) < self.fii_lookback:
+            return 0.0
+        
+        # 5-day rolling sum
+        fii_5d = fii_net_flows.rolling(window=5).sum()
+        
+        # Z-score calculation
+        # Use expanding or rolling window for mean/std to avoid look-ahead bias in backtest
+        # For current state, we use the trailing lookback window stats
+        window = fii_5d.iloc[-self.fii_lookback:]
+        mean = window.mean()
+        std = window.std()
+        
+        if std == 0 or pd.isna(std):
+            return 0.0
+            
+        current_val = fii_5d.iloc[-1]
+        z_score = (current_val - mean) / std
+        
+        return round(float(z_score), 4)
 
+    def calculate_pcr_percentile(self, pcr_series: pd.Series) -> float:
+        """
+        Calculate percentile of smoothed PCR within lookback window.
+        """
+        if pcr_series.empty or len(pcr_series) < self.pcr_lookback:
+            return 0.5 # Neutral default
+        
+        # Smooth PCR
+        pcr_smooth = pcr_series.rolling(window=self.pcr_smooth_window).mean()
+        
+        # Get window
+        window = pcr_smooth.iloc[-self.pcr_lookback:]
+        current_val = pcr_smooth.iloc[-1]
+        
+        if pd.isna(current_val):
+            return 0.5
+            
+        # Percentile rank
+        percentile = (window < current_val).sum() / len(window)
+        
+        return round(float(percentile), 4)
 
-def compute_institutional_bias(fii_net: float, dii_net: float) -> str:
-    """Classify combined institutional flow direction."""
-    combined = fii_net + dii_net
-    if combined > 500:  # crore threshold
-        return "net_buy"
-    elif combined < -500:
-        return "net_sell"
-    return "neutral"
-
-
-def compute_pcr_percentile(
-    current_pcr: float,
-    historical_pcr: list[float],
-) -> float:
-    """
-    Rank current PCR against historical distribution.
-
-    Returns percentile in 0-100 range.
-    High percentile (>70) suggests excessive puts (potential support).
-    Low percentile (<30) suggests excessive calls (potential resistance).
-    """
-    if not historical_pcr:
-        return 50.0
-
-    below = sum(1 for p in historical_pcr if p <= current_pcr)
-    return round((below / len(historical_pcr)) * 100, 1)
-
-
-def compute_sector_rs(
-    sector_prices: dict[str, list[float]],
-    benchmark_prices: list[float],
-    window: int = 20,
-) -> dict[str, float]:
-    """
-    Compute Relative Strength of each sector vs benchmark.
-
-    RS = sector_return / benchmark_return over the window.
-    """
-    if len(benchmark_prices) < window:
-        return {}
-
-    benchmark_return = (
-        (benchmark_prices[-1] - benchmark_prices[-window])
-        / benchmark_prices[-window]
-    )
-
-    rs_map: dict[str, float] = {}
-    for sector, prices in sector_prices.items():
-        if len(prices) < window:
-            continue
-        sector_return = (prices[-1] - prices[-window]) / prices[-window]
-        # Avoid division by zero
-        if benchmark_return == 0:
-            rs_map[sector] = 0.0
+    def calculate_rs_spread(self, sector_returns: pd.DataFrame) -> float:
+        """
+        Calculate spread between top and bottom sector RS.
+        RS is defined as return over lookback period.
+        Spread = Top Quintile Return - Bottom Quintile Return.
+        """
+        if sector_returns.empty or sector_returns.shape[1] < 5:
+            return 0.0
+        
+        # Calculate returns over lookback
+        # Assuming input is price series. If returns, adjust logic.
+        # Assuming input DataFrame columns are sectors, index is date.
+        if len(sector_returns) < self.rs_spread_lookback:
+            lookback = len(sector_returns)
         else:
-            rs_map[sector] = round(sector_return / benchmark_return, 4)
+            lookback = self.rs_spread_lookback
+            
+        # Simple return calculation
+        start_prices = sector_returns.iloc[-lookback]
+        end_prices = sector_returns.iloc[-1]
+        
+        returns = (end_prices - start_prices) / start_prices
+        
+        # Drop NaNs
+        returns = returns.dropna()
+        
+        if returns.empty:
+            return 0.0
+            
+        # Sort
+        sorted_returns = returns.sort_values()
+        
+        # Quintiles
+        n = len(sorted_returns)
+        q1_threshold = int(n * 0.2)
+        q5_threshold = int(n * 0.8)
+        
+        if q1_threshold == 0 or q5_threshold >= n:
+            return 0.0
+            
+        bottom_q_mean = sorted_returns.iloc[:q1_threshold].mean()
+        top_q_mean = sorted_returns.iloc[q5_threshold:].mean()
+        
+        spread = top_q_mean - bottom_q_mean
+        
+        return round(float(spread), 4)
 
-    return rs_map
-
-
-def compute_flows(
-    fii_net: float,
-    dii_net: float,
-    current_pcr: float,
-    historical_pcr: list[float],
-    sector_prices: dict[str, list[float]],
-    benchmark_prices: list[float],
-) -> FlowsResult:
-    """Run the full Flows engine and return aggregated result."""
-    inst_bias = compute_institutional_bias(fii_net, dii_net)
-    pcr_pct = compute_pcr_percentile(current_pcr, historical_pcr)
-    sector_rs = compute_sector_rs(sector_prices, benchmark_prices)
-
-    # Derive overall bias from components
-    bullish_signals = 0
-    bearish_signals = 0
-
-    if inst_bias == "net_buy":
-        bullish_signals += 1
-    elif inst_bias == "net_sell":
-        bearish_signals += 1
-
-    if pcr_pct > 70:
-        bullish_signals += 1  # high PCR = contrarian bullish
-    elif pcr_pct < 30:
-        bearish_signals += 1
-
-    if bullish_signals > bearish_signals:
-        overall = "bullish"
-    elif bearish_signals > bullish_signals:
-        overall = "bearish"
-    else:
-        overall = "neutral"
-
-    return FlowsResult(
-        fii_net=fii_net,
-        dii_net=dii_net,
-        institutional_bias=inst_bias,
-        pcr_value=current_pcr,
-        pcr_percentile=pcr_pct,
-        sector_rs=sector_rs,
-        overall_bias=overall,
-    )
+    def run(self, fii_flows: pd.Series, dii_flows: pd.Series, pcr_data: pd.Series, 
+            sector_prices: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Main execution method.
+        """
+        # 1. Calculate Components
+        fii_z = self.calculate_fii_zscore(fii_flows)
+        dii_z = self.calculate_fii_zscore(dii_flows) # Reusing Z-score logic for DII
+        pcr_pct = self.calculate_pcr_percentile(pcr_data)
+        rs_spread = self.calculate_rs_spread(sector_prices)
+        
+        # 2. Normalize Components to [-1, 1] or [0, 1] scale
+        # FII Z-score: Clip to [-3, 3] and normalize
+        fii_norm = np.clip(fii_z, -3, 3) / 3.0
+        
+        # DII Z-score: Same normalization
+        dii_norm = np.clip(dii_z, -3, 3) / 3.0
+        
+        # PCR Percentile: High PCR usually means bearish (overbought calls), Low PCR bullish.
+        # Inverse relationship. 0.0 (Low PCR) -> Bullish (+1), 1.0 (High PCR) -> Bearish (-1)
+        pcr_norm = 1.0 - (2.0 * pcr_pct)
+        
+        # RS Spread: Positive spread means leadership (Bullish). Negative means lagging (Bearish).
+        # Normalize spread. Typical spread might be 0.2 to 0.5.
+        rs_norm = np.clip(rs_spread * 2, -1, 1) # Scale factor 2
+        
+        # 2a. Absorption Logic (v0.6.1)
+        is_absorption = False
+        if fii_norm < -0.3 and dii_norm > 0.3:
+            # Check if DII is absorbing a significant portion of FII selling
+            # We use the 5-day rolling sums (latest values)
+            fii_5d = fii_flows.rolling(5).sum().iloc[-1]
+            dii_5d = dii_flows.rolling(5).sum().iloc[-1]
+            if dii_5d > abs(fii_5d) * 0.7:
+                is_absorption = True
+        
+        # 3. Weighted Score
+        flows_score = (
+            self.weights['fii'] * fii_norm +
+            self.weights['dii'] * dii_norm +
+            self.weights['pcr'] * pcr_norm +
+            self.weights['rs_spread'] * rs_norm
+        )
+        
+        if is_absorption:
+            flows_score = max(flows_score, 0.1) # Boost to at least neutral-positive
+        
+        # 4. Construct Output
+        flows_state = {
+            'flows_score': round(float(flows_score), 4),
+            'fii_5d_z': fii_z,
+            'dii_5d_z': dii_z,
+            'is_absorption': is_absorption,
+            'pcr_smooth': round(float(pcr_pct), 4),
+            'rs_spread_pct': rs_spread,
+            'components': {
+                'fii_norm': round(float(fii_norm), 4),
+                'dii_norm': round(float(dii_norm), 4),
+                'pcr_norm': round(float(pcr_norm), 4),
+                'rs_norm': round(float(rs_norm), 4)
+            }
+        }
+        
+        return flows_state
