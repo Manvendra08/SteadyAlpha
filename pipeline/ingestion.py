@@ -238,7 +238,7 @@ class IngestionOrchestrator:
         results["equity_curve"]   = _risk_state.fetch()
 
         logger.info("[ingestion] Fetching delivery data...")
-        results["delivery"]       = _delivery.fetch(self.config)
+        results["delivery"]       = _delivery.fetch({})
 
         # ── 2. Log summary ─────────────────────────────────────────────────
         self._log_summary(results)
@@ -380,12 +380,12 @@ class IngestionOrchestrator:
 
 # ─── Provenance dict for persistence ─────────────────────────────────────────
 
-def build_provenance(bundle: DataBundle) -> list[dict]:
+def build_provenance(bundle: DataBundle) -> dict[str, dict]:
     """Serialize provenance for persist.py consumption."""
-    rows = []
+    provenance = {}
     for key, r in bundle.results.items():
         row = r.to_dict()
         row["run_validity"]       = bundle.run_validity
         row["paper_promo_allowed"] = bundle.run_validity != "NO"
-        rows.append(row)
-    return rows
+        provenance[key] = row
+    return provenance

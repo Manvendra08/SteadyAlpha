@@ -39,11 +39,12 @@ class PersistenceManager:
             'timestamp': timestamp,
             'status': status,
             'duration_ms': duration_ms,
-            'validity': validity,
-            'invalid_reasons': invalid_reasons,
-            'paper_allowed': paper_allowed,
             'errors': [],
-            'meta': {}
+            'meta': {
+                'validity': validity,
+                'invalid_reasons': invalid_reasons,
+                'paper_allowed': paper_allowed
+            }
         }
         self.supabase.table('runs').insert(data).execute()
 

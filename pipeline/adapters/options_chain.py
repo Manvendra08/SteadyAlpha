@@ -63,33 +63,30 @@ def fetch_options_chain() -> FetchResult:
     return FetchResult.missing(OI_KEY, OI_CRIT, "Options chain: all sources failed")
 
 
-# ─── nsepython ────────────────────────────────────────────────────────────────
+from pipeline.adapters.nse_session import fetch_nse_api
 
-@with_retry(max_attempts=2, base_delay=2.0)
-def _nsepython_pcr_raw() -> dict:
-    from nsepython import pcr  # type: ignore
-    return pcr(SYMBOL)
-
+@with_retry(max_attempts=3, base_delay=3.0)
+def _fetch_options_chain_raw() -> dict:
+    url = f"https://www.nseindia.com/api/option-chain-indices?symbol={SYMBOL}"
+    return fetch_nse_api(url)
 
 def _try_nsepython_pcr() -> Optional[FetchResult]:
+    # Rung 1: previously nsepython, now using direct custom session
     try:
-        data = _nsepython_pcr_raw()
-        if data is None:
+        data = _fetch_options_chain_raw()
+        if not data or "records" not in data or "data" not in data["records"]:
+            logger.warning("[pcr] custom session returned empty or blocked response")
             return None
-
-        # nsepython pcr() returns {'pcr': float, ...}
-        pcr_val = None
-        if isinstance(data, dict):
-            pcr_val = data.get("pcr") or data.get("PCR") or data.get("CE/PE OI")
-        elif isinstance(data, (int, float)):
-            pcr_val = float(data)
-
-        if pcr_val is None:
-            logger.warning(f"[pcr] nsepython: unexpected response shape: {type(data)}")
+            
+        records = data["records"]["data"]
+        pe_oi = sum(item.get("PE", {}).get("openInterest", 0) for item in records)
+        ce_oi = sum(item.get("CE", {}).get("openInterest", 0) for item in records)
+        
+        if ce_oi == 0:
             return None
-
-        pcr_val = float(pcr_val)
-
+            
+        pcr_val = pe_oi / ce_oi
+        
         # Validation
         if not (PCR_MIN <= pcr_val <= PCR_MAX):
             logger.warning(f"[pcr] PCR {pcr_val} outside sanity range [{PCR_MIN},{PCR_MAX}]")
@@ -98,7 +95,7 @@ def _try_nsepython_pcr() -> Optional[FetchResult]:
         market_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return FetchResult(
             dataset_key   = PCR_KEY,
-            provider      = "nsepython",
+            provider      = "custom_session",
             source_type   = "REAL",
             freshness     = "FRESH",
             criticality   = PCR_CRIT,
@@ -107,34 +104,26 @@ def _try_nsepython_pcr() -> Optional[FetchResult]:
             market_date   = market_date,
             fetched_at    = now_iso(),
             record_count  = 1,
-            payload       = {"pcr_latest": pcr_val},
+            payload       = {"pcr_latest": float(pcr_val)},
         )
-    except ImportError:
-        logger.warning("[pcr] nsepython not installed")
-        return None
     except Exception as exc:
-        logger.error(f"[pcr] nsepython exception: {exc}")
+        logger.error(f"[pcr] custom session exception: {exc}")
         return None
-
-
-@with_retry(max_attempts=2, base_delay=2.0)
-def _nsepython_chain_raw() -> pd.DataFrame:
-    from nsepython import option_chain  # type: ignore
-    return option_chain(SYMBOL)
-
 
 def _try_nsepython_chain() -> Optional[FetchResult]:
     try:
-        df = _nsepython_chain_raw()
-        if df is None or (hasattr(df, 'empty') and df.empty):
+        data = _fetch_options_chain_raw()
+        if not data or "records" not in data or "data" not in data["records"]:
+            return None
+            
+        df = pd.DataFrame(data["records"]["data"])
+        if df.empty:
             return None
 
-        record_count = len(df) if hasattr(df, '__len__') else None
-        market_date  = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
+        market_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return FetchResult(
             dataset_key   = OI_KEY,
-            provider      = "nsepython",
+            provider      = "custom_session",
             source_type   = "REAL",
             freshness     = "FRESH",
             criticality   = OI_CRIT,
@@ -142,26 +131,21 @@ def _try_nsepython_chain() -> Optional[FetchResult]:
             trading_valid = True,
             market_date   = market_date,
             fetched_at    = now_iso(),
-            record_count  = record_count,
+            record_count  = len(df),
             payload       = df,
         )
-    except ImportError:
-        return None
     except Exception as exc:
-        logger.error(f"[options_chain] exception: {exc}")
+        logger.error(f"[options_chain] custom session exception: {exc}")
         return None
-
 
 # ─── Scrape placeholder ───────────────────────────────────────────────────────
 
 def _try_scrape_options() -> Optional[FetchResult]:
     """
-    TODO: NSE options-chain page scrape.
-    URL: https://www.nseindia.com/option-chain
-    Implement: requests session with NSE headers → parse JSON embedded in page.
-    Must validate: strike list non-empty, CE+PE OI numeric, PCR computable.
+    Fallback Rung 2: Scrape from alternative sources (e.g. Sensibull/Moneycontrol)
+    if NSE API completely blocks the robust session.
     """
-    logger.info("[pcr] Scrape fallback not yet implemented.")
+    logger.info("[pcr] Scrape fallback logic not yet implemented for third party.")
     return None
 
 

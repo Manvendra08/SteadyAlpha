@@ -72,46 +72,65 @@ def fetch_dii() -> FetchResult:
 # ─── nsepython attempts ───────────────────────────────────────────────────────
 
 @with_retry(max_attempts=2, base_delay=2.0)
-def _nsepython_fii_raw(start_str: str, end_str: str) -> pd.DataFrame:
-    """
-    nsepython FII fetch. Requires: pip install nsepython
-    Format: DD-MM-YYYY
-    """
-    from nsepython import fii_dii_data  # type: ignore
-    df = fii_dii_data(start_str, end_str)
+def _nsepython_fiidii_daily() -> pd.DataFrame:
+    from nsepython import nse_fiidii  # type: ignore
+    df = nse_fiidii("pandas")
+    if df is None or (hasattr(df, "empty") and df.empty):
+        raise ValueError("nse_fiidii returned empty")
     return df
 
+def _process_daily_fiidii(df_daily: pd.DataFrame, category_pattern: str, key: str, criticality: str) -> Optional[FetchResult]:
+    try:
+        # Filter DII or FII
+        row = df_daily[df_daily["category"].str.contains(category_pattern, case=False, na=False)]
+        if row.empty:
+            return None
+        
+        val = float(row.iloc[0]["netValue"])
+        date_str = str(row.iloc[0]["date"])
+        
+        # Load cache to build series
+        meta = cache_read_meta(key)
+        series_data = {}
+        if meta and "payload" in meta:
+            try:
+                cached_series = pd.read_json(meta["payload"], typ="series")
+                series_data = cached_series.to_dict()
+            except:
+                pass
+                
+        series_data[date_str] = val
+        final_series = pd.Series(series_data).sort_index()
+        
+        # Keep last 150 days
+        if len(final_series) > 150:
+            final_series = final_series.iloc[-150:]
+            
+        if len(final_series) < MIN_ROWS:
+            logger.warning(f"[{key}] Only {len(final_series)} rows after appending daily data.")
+            return None
+            
+        return FetchResult(
+            dataset_key   = key,
+            provider      = "nsepython_daily",
+            source_type   = "REAL",
+            freshness     = "FRESH",
+            criticality   = criticality,
+            success       = True,
+            trading_valid = True,
+            market_date   = date_str,
+            fetched_at    = now_iso(),
+            record_count  = len(final_series),
+            payload       = final_series,
+        )
+    except Exception as exc:
+        logger.error(f"[{key}] failed to process daily append: {exc}")
+        return None
 
 def _try_nsepython_fii(start_str: str, end_str: str) -> Optional[FetchResult]:
     try:
-        df = _nsepython_fii_raw(start_str, end_str)
-        if df is None or df.empty:
-            return None
-
-        # Validate numeric FII column exists
-        fii_col = next((c for c in df.columns if "FII" in c.upper() or "FOREIGN" in c.upper()), None)
-        if fii_col is None:
-            logger.warning("[fii] nsepython: no FII column found in response")
-            return None
-
-        fii_series = pd.to_numeric(df[fii_col], errors="coerce").dropna()
-        if len(fii_series) < MIN_ROWS:
-            logger.warning(f"[fii] nsepython: only {len(fii_series)} valid rows")
-            return None
-
-        return FetchResult(
-            dataset_key   = FII_KEY,
-            provider      = "nsepython",
-            source_type   = "REAL",
-            freshness     = "FRESH",
-            criticality   = FII_CRITICALITY,
-            success       = True,
-            trading_valid = True,
-            market_date   = end_str,
-            fetched_at    = now_iso(),
-            record_count  = len(fii_series),
-            payload       = fii_series,
-        )
+        df_daily = _nsepython_fiidii_daily()
+        return _process_daily_fiidii(df_daily, "FII", FII_KEY, FII_CRITICALITY)
     except ImportError:
         logger.warning("[fii] nsepython not installed. Skipping.")
         return None
@@ -119,40 +138,10 @@ def _try_nsepython_fii(start_str: str, end_str: str) -> Optional[FetchResult]:
         logger.error(f"[fii] nsepython exception: {exc}")
         return None
 
-
-@with_retry(max_attempts=2, base_delay=2.0)
-def _nsepython_dii_raw(start_str: str, end_str: str) -> pd.DataFrame:
-    from nsepython import fii_dii_data  # type: ignore
-    return fii_dii_data(start_str, end_str)
-
-
 def _try_nsepython_dii(start_str: str, end_str: str) -> Optional[FetchResult]:
     try:
-        df = _nsepython_dii_raw(start_str, end_str)
-        if df is None or df.empty:
-            return None
-
-        dii_col = next((c for c in df.columns if "DII" in c.upper() or "DOMESTIC" in c.upper()), None)
-        if dii_col is None:
-            return None
-
-        dii_series = pd.to_numeric(df[dii_col], errors="coerce").dropna()
-        if len(dii_series) < MIN_ROWS:
-            return None
-
-        return FetchResult(
-            dataset_key   = DII_KEY,
-            provider      = "nsepython",
-            source_type   = "REAL",
-            freshness     = "FRESH",
-            criticality   = DII_CRITICALITY,
-            success       = True,
-            trading_valid = True,
-            market_date   = end_str,
-            fetched_at    = now_iso(),
-            record_count  = len(dii_series),
-            payload       = dii_series,
-        )
+        df_daily = _nsepython_fiidii_daily()
+        return _process_daily_fiidii(df_daily, "DII", DII_KEY, DII_CRITICALITY)
     except ImportError:
         return None
     except Exception as exc:
