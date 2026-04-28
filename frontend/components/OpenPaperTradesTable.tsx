@@ -1,62 +1,69 @@
+'use client';
 import React from 'react';
 
 export interface OpenPaperTradeRow {
-    id: string;
-    symbol: string;
-    direction: 'LONG' | 'SHORT';
-    qty: number;
-    entryPrice: number;
-    slippageBps: number;
-    entryAt: string;
-    simulationVersion: string;
+  id: string;
+  symbol: string;
+  direction: 'LONG' | 'SHORT';
+  qty: number;
+  entryPrice: number;
+  entryAt: string;
+  simulationVersion: string;
 }
 
 interface OpenPaperTradesTableProps {
-    trades: OpenPaperTradeRow[];
+  trades: OpenPaperTradeRow[];
 }
 
 export default function OpenPaperTradesTable({ trades }: OpenPaperTradesTableProps) {
+  if (trades.length === 0) {
     return (
-        <div
-            style={{
-                padding: '20px',
-                borderRadius: '12px',
-                backgroundColor: '#1a202c',
-                border: '1px solid #2d3748',
-                color: '#e2e8f0',
-                marginBottom: '20px',
-            }}
-        >
-            <h3 style={{ marginTop: 0, marginBottom: '12px', fontSize: '16px' }}>Open Paper Trades</h3>
-            <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <thead>
-                        <tr style={{ color: '#a0aec0', textAlign: 'left' }}>
-                            <th style={{ padding: '8px 6px' }}>Symbol</th>
-                            <th style={{ padding: '8px 6px' }}>Dir</th>
-                            <th style={{ padding: '8px 6px' }}>Qty</th>
-                            <th style={{ padding: '8px 6px' }}>Entry Price</th>
-                            <th style={{ padding: '8px 6px' }}>Slippage (bps)</th>
-                            <th style={{ padding: '8px 6px' }}>Entry At</th>
-                            <th style={{ padding: '8px 6px' }}>Sim Ver</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {trades.map((t) => (
-                            <tr key={t.id} style={{ borderTop: '1px solid #2d3748' }}>
-                                <td style={{ padding: '8px 6px' }}>{t.symbol}</td>
-                                <td style={{ padding: '8px 6px' }}>{t.direction}</td>
-                                <td style={{ padding: '8px 6px' }}>{t.qty}</td>
-                                <td style={{ padding: '8px 6px' }}>{t.entryPrice.toFixed(2)}</td>
-                                <td style={{ padding: '8px 6px' }}>{t.slippageBps}</td>
-                                <td style={{ padding: '8px 6px' }}>{new Date(t.entryAt).toLocaleString()}</td>
-                                <td style={{ padding: '8px 6px' }}>{t.simulationVersion}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+      <div className="bg-bg-card border border-border-theme rounded-xl p-6 flex items-center gap-3">
+        <span className="text-text-muted text-lg">📁</span>
+        <div>
+          <div className="text-text-muted text-sm">No open paper trades</div>
+          <div className="text-[10px] text-text-muted opacity-60 mt-0.5">
+            When signals are promoted, active trades will appear here
+          </div>
         </div>
+      </div>
     );
+  }
+
+  return (
+    <div className="bg-bg-card border border-border-theme rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-border-theme flex items-center justify-between bg-white/5">
+        <h2 className="text-text-muted text-[10px] font-bold uppercase tracking-widest">Active Exposure</h2>
+        <span className="text-[10px] text-green-400 font-bold bg-green-400/10 px-2 py-0.5 rounded border border-green-400/20">
+          {trades.length} OPEN
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs text-left">
+          <thead className="border-b border-border-theme text-text-muted uppercase tracking-widest text-[10px]">
+            <tr>
+              {['Symbol', 'Direction', 'Qty', 'Entry Price', 'Entry Time', 'Version'].map(h => (
+                <th key={h} className="px-4 py-2.5 font-semibold">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border-theme text-text-secondary">
+            {trades.map((t) => (
+              <tr key={t.id} className="hover:bg-bg-elevated/50 transition-colors">
+                <td className="px-4 py-2.5 font-mono font-semibold text-text-primary">{t.symbol}</td>
+                <td className={`px-4 py-2.5 font-bold ${t.direction === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
+                  {t.direction}
+                </td>
+                <td className="px-4 py-2.5 font-mono">{t.qty}</td>
+                <td className="px-4 py-2.5 font-mono text-text-primary">₹{t.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td className="px-4 py-2.5 text-text-muted">{new Date(t.entryAt).toLocaleString()}</td>
+                <td className="px-4 py-2.5 text-text-muted font-mono opacity-50">{t.simulationVersion}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 

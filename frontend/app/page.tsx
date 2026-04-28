@@ -8,6 +8,8 @@ import RiskCard from '../components/RiskCard';
 import DecisionPanel from '../components/DecisionPanel';
 import ChangesPanel from '../components/ChangesPanel';
 import PaperActionsTable from '../components/PaperActionsTable';
+import OpenPaperTradesTable from '../components/OpenPaperTradesTable';
+import ClosedPaperTradesTable from '../components/ClosedPaperTradesTable';
 import DiagnosticsDrawer from '../components/DiagnosticsDrawer';
 import RawDataEvidenceDrawer from '../components/RawDataEvidenceDrawer';
 import { supabase } from '../lib/supabase';
@@ -125,6 +127,42 @@ export default async function Home() {
     .select('*')
     .order('created_at', { ascending: false })
     .limit(20);
+
+  const { data: rawOpenTrades } = await supabase
+    .from('paper_trades')
+    .select('*')
+    .eq('status', 'open')
+    .order('entry_at', { ascending: false });
+
+  const { data: rawClosedTrades } = await supabase
+    .from('paper_trades')
+    .select('*')
+    .eq('status', 'closed')
+    .order('exit_at', { ascending: false })
+    .limit(20);
+
+  const openTrades = (rawOpenTrades ?? []).map((t: any) => ({
+    id: t.id?.toString() ?? '',
+    symbol: t.symbol,
+    direction: t.direction,
+    qty: t.qty,
+    entryPrice: t.entry_price,
+    entryAt: t.entry_at,
+    simulationVersion: t.simulation_version,
+  }));
+
+  const closedTrades = (rawClosedTrades ?? []).map((t: any) => ({
+    id: t.id?.toString() ?? '',
+    symbol: t.symbol,
+    direction: t.direction,
+    qty: t.qty,
+    entryPrice: t.entry_price,
+    exitPrice: t.exit_price,
+    pnl: t.pnl ?? 0,
+    entryAt: t.entry_at,
+    exitAt: t.exit_at,
+    exitReason: t.exit_reason,
+  }));
 
   // ── derive top-level ─────────────────────────────────────────────────────
   const sysStatus: DashboardViewModel['systemStatus'] =
@@ -343,6 +381,12 @@ export default async function Home() {
           decisionLabel={vm.decision.label}
           riskMode={vm.riskMode}
         />
+
+        {/* Paper Trades */}
+        <div className="grid grid-cols-1 gap-5 mt-5">
+          <OpenPaperTradesTable trades={openTrades} />
+          <ClosedPaperTradesTable trades={closedTrades} />
+        </div>
 
         {/* Diagnostics drawer */}
         <DiagnosticsDrawer diagnostics={vm.diagnostics} />
