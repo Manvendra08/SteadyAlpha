@@ -10,6 +10,7 @@ import ChangesPanel from '../components/ChangesPanel';
 import PaperActionsTable from '../components/PaperActionsTable';
 import OpenPaperTradesTable from '../components/OpenPaperTradesTable';
 import ClosedPaperTradesTable from '../components/ClosedPaperTradesTable';
+import SegmentedPerformance from '../components/SegmentedPerformance';
 import DiagnosticsDrawer from '../components/DiagnosticsDrawer';
 import RawDataEvidenceDrawer from '../components/RawDataEvidenceDrawer';
 import { supabase } from '../lib/supabase';
@@ -387,6 +388,9 @@ export default async function Home() {
           <OpenPaperTradesTable trades={openTrades} />
           <ClosedPaperTradesTable trades={closedTrades} />
         </div>
+
+        {/* Segmented Performance */}
+        <SegmentedPerformance trades={closedTrades} />
 
         {/* Diagnostics drawer */}
         <DiagnosticsDrawer diagnostics={vm.diagnostics} />

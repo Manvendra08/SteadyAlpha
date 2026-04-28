@@ -1,6 +1,7 @@
+'use client';
 import React from 'react';
 
-interface Trade {
+export interface Trade {
   pnl: number;
   regimeAtEntry: string;
 }
@@ -23,25 +24,36 @@ export default function SegmentedPerformance({ trades }: Props) {
   });
 
   return (
-    <div style={{ backgroundColor: '#1a202c', padding: '20px', borderRadius: '12px', border: '1px solid #2d3748', marginTop: '20px', color: '#e2e8f0' }}>
-      <h2 style={{ fontSize: '18px', marginBottom: '16px', color: '#a0aec0', textTransform: 'uppercase' }}>Performance by Regime</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-        {Object.keys(statsByRegime).length === 0 ? <div style={{color: '#718096'}}>No closed trades yet.</div> : null}
+    <div className="bg-bg-card border border-border-theme rounded-xl overflow-hidden mt-5">
+      <div className="px-4 py-3 border-b border-border-theme flex items-center justify-between bg-white/5">
+        <h2 className="text-text-muted text-[10px] font-bold uppercase tracking-widest">Performance by Regime</h2>
+        <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded border border-border-theme">
+          {trades.length} TRADES
+        </span>
+      </div>
+      <div className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+        {Object.keys(statsByRegime).length === 0 ? (
+          <div className="text-text-muted text-sm col-span-full">No closed trades yet.</div>
+        ) : null}
         {Object.entries(statsByRegime).map(([regime, stats]) => {
           const winRate = stats.total > 0 ? (stats.wins / stats.total) * 100 : 0;
           return (
-            <div key={regime} style={{ backgroundColor: '#2d3748', padding: '16px', borderRadius: '8px' }}>
-              <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '8px' }}>{regime}</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ color: '#a0aec0', fontSize: '12px' }}>Win Rate:</span>
-                <span style={{ fontSize: '14px', color: winRate >= 50 ? '#68d391' : '#fc8181' }}>{winRate.toFixed(1)}%</span>
+            <div key={regime} className="bg-bg-elevated border border-border-theme p-4 rounded-lg">
+              <div className="text-text-primary text-sm font-bold mb-3 tracking-wide">{regime}</div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-text-muted text-xs uppercase tracking-wider">Win Rate</span>
+                <span className={`text-sm font-bold ${winRate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
+                  {winRate.toFixed(1)}%
+                </span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#a0aec0', fontSize: '12px' }}>Net PnL:</span>
-                <span style={{ fontSize: '14px', color: stats.pnl >= 0 ? '#68d391' : '#fc8181' }}>₹{stats.pnl.toFixed(0)}</span>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-text-muted text-xs uppercase tracking-wider">Net PnL</span>
+                <span className={`text-sm font-mono font-bold ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {stats.pnl > 0 ? '+' : ''}₹{stats.pnl.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
               </div>
-              <div style={{ fontSize: '11px', color: '#718096', marginTop: '8px', textAlign: 'right' }}>
-                {stats.total} trades
+              <div className="text-right text-[10px] text-text-muted font-mono opacity-60">
+                {stats.total} {stats.total === 1 ? 'trade' : 'trades'}
               </div>
             </div>
           );
