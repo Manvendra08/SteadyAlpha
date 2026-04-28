@@ -21,17 +21,17 @@ Goal: Build a reliable signal engine and validate it through automated paper tra
 - Advisor Layer: Weighted voting and reasoning [REQ-202]
 - Change Tracking: "What changed since last run" visibility [REQ-203]
 
-### Phase 3: Automated Paper Execution [ACTIVE]
+### Phase 3: Automated Paper Execution [COMPLETE]
 **Objective:** Tool-generated paper trades from qualified signals.
 - Paper Trade Tables: Orders and Trades [REQ-301]
 - Promotion Rules: Recommendation to paper order [REQ-302]
 - Execution Screens: Open/Closed paper trades [REQ-303]
 
-### Phase 4: Performance Review & Broker Hardening
+### Phase 4: Performance Review & Broker Hardening [ACTIVE]
 **Objective:** Segmented performance analysis and broker adapter isolation.
-- Performance Views: By regime, setup, and confidence [REQ-401]
-- Broker Adapter: Isolated interface for execution [REQ-402]
-- Risk Guardrails: Kill switch and daily loss limits [REQ-403]
+- [x] Performance Views: By regime, setup, and confidence [REQ-401]
+- [ ] Broker Adapter: Isolated interface for execution [REQ-402]
+- [ ] Risk Guardrails: Kill switch and daily loss limits [REQ-403]
 
 ### Phase 5: Constrained Live Automation
 **Objective:** Earned live trading with strict constraints.
