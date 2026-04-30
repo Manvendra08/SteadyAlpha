@@ -199,11 +199,11 @@ def get_advance_decline() -> Optional[dict]:
         return None
 
 
-def get_fii_dii() -> Optional[dict]:
+def get_fii_dii() -> Optional[list[dict]]:
     """
     Latest FII/DII cash + derivatives flows.
 
-    Returns:
+    Returns list of dicts:
       date, index_name, index_value, index_change_pct,
       fii_cash, dii_cash, fii_net_derivatives, net_value
     """
@@ -215,26 +215,27 @@ def get_fii_dii() -> Optional[dict]:
         if not data:
             return None
 
-        # Most recent entry first
-        entry = data[0]
-        day   = entry.get("date", "")
-        month = entry.get("month", "")
+        result = []
         year  = datetime.now(timezone.utc).year
-        date_str = f"{year}-{month}-{day.zfill(2)}"
+        for entry in data:
+            day   = entry.get("date", "")
+            month = entry.get("month", "")
+            date_str = f"{year}-{month}-{day.zfill(2)}"
 
-        return {
-            "date":                date_str,
-            "index_name":          entry.get("indexName"),
-            "index_value":         entry.get("indexValue"),
-            "index_change_pct":    entry.get("indexChangePercent"),
-            "fii_cash":            entry.get("fiiCash"),
-            "dii_cash":            entry.get("diiCash"),
-            "net_value":           entry.get("netValue"),
-            "fii_net_derivatives": entry.get("netDerivatives"),
-            "fii_idx_futures":     entry.get("fiiIdxFut"),
-            "fii_idx_options":     entry.get("fiiIdxOpt"),
-            "fetched_at":          datetime.now(timezone.utc).isoformat(),
-        }
+            result.append({
+                "date":                date_str,
+                "index_name":          entry.get("indexName"),
+                "index_value":         entry.get("indexValue"),
+                "index_change_pct":    entry.get("indexChangePercent"),
+                "fii_cash":            entry.get("fiiCash"),
+                "dii_cash":            entry.get("diiCash"),
+                "net_value":           entry.get("netValue"),
+                "fii_net_derivatives": entry.get("netDerivatives"),
+                "fii_idx_futures":     entry.get("fiiIdxFut"),
+                "fii_idx_options":     entry.get("fiiIdxOpt"),
+                "fetched_at":          datetime.now(timezone.utc).isoformat(),
+            })
+        return result
     except Exception as exc:
         logger.warning(f"[r360/fii_dii] parse error: {exc}")
         return None

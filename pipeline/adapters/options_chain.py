@@ -94,7 +94,7 @@ def _try_research360_pcr() -> Optional[FetchResult]:
             dataset_key=PCR_KEY, provider="research360", source_type="REAL",
             freshness="FRESH", criticality=PCR_CRIT, success=True, trading_valid=True,
             market_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            fetched_at=now_iso(), record_count=1, payload={"pcr": pcr}
+            fetched_at=now_iso(), record_count=1, payload={"pcr_latest": pcr}
         )
     except Exception as exc:
         logger.warning(f"[pcr/r360] exception: {exc}")
@@ -139,7 +139,7 @@ def _try_stealth_nse_pcr() -> Optional[FetchResult]:
             dataset_key=PCR_KEY, provider="nse_stealth", source_type="REAL",
             freshness="FRESH", criticality=PCR_CRIT, success=True, trading_valid=True,
             market_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            fetched_at=now_iso(), record_count=1, payload={"pcr": pcr}
+            fetched_at=now_iso(), record_count=1, payload={"pcr_latest": pcr}
         )
     except Exception as e:
         logger.warning(f"[pcr/stealth] parse error: {e}")
@@ -150,9 +150,13 @@ def _try_r360_dom_pcr() -> Optional[FetchResult]:
     """Rung 2: DOM Scraping from Research360 (fallback)."""
     try:
         from pipeline.adapters.r360_scraper import get_r360_pcr_dom
-        pcr = get_r360_pcr_dom(SYMBOL)
-        if pcr is None:
+        metrics = get_r360_pcr_dom(SYMBOL)
+        if not metrics or metrics.get("pcr") is None:
             return None
+            
+        pcr = metrics.get("pcr")
+        max_pain = metrics.get("max_pain")
+        spot_price = metrics.get("spot_price")
         
         if not (PCR_MIN <= pcr <= PCR_MAX):
             logger.warning(f"[pcr/r360_dom] PCR {pcr} out of range")
@@ -162,7 +166,11 @@ def _try_r360_dom_pcr() -> Optional[FetchResult]:
             dataset_key=PCR_KEY, provider="r360_dom", source_type="SCRAPED",
             freshness="FRESH", criticality=PCR_CRIT, success=True, trading_valid=True,
             market_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            fetched_at=now_iso(), record_count=1, payload={"pcr": pcr}
+            fetched_at=now_iso(), record_count=1, payload={
+                "pcr_latest": pcr,
+                "max_pain": max_pain,
+                "spot_price": spot_price
+            }
         )
     except Exception as exc:
         logger.warning(f"[pcr/r360_dom] exception: {exc}")

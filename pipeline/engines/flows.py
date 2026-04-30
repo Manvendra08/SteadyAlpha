@@ -32,8 +32,10 @@ class FlowsEngine:
         """
         Calculate Z-score of 5-day rolling sum of FII flows over lookback period.
         """
-        if fii_net_flows is None or fii_net_flows.empty or len(fii_net_flows) < self.fii_lookback:
+        if fii_net_flows is None or fii_net_flows.empty or len(fii_net_flows) < 10:
             return 0.0
+            
+        lookback = min(len(fii_net_flows), self.fii_lookback)
         
         # 5-day rolling sum
         fii_5d = fii_net_flows.rolling(window=5).sum()
@@ -41,7 +43,7 @@ class FlowsEngine:
         # Z-score calculation
         # Use expanding or rolling window for mean/std to avoid look-ahead bias in backtest
         # For current state, we use the trailing lookback window stats
-        window = fii_5d.iloc[-self.fii_lookback:]
+        window = fii_5d.iloc[-lookback:]
         mean = window.mean()
         std = window.std()
         
@@ -123,7 +125,7 @@ class FlowsEngine:
         return round(float(spread), 4)
 
     def run(self, fii_flows: pd.Series, dii_flows: pd.Series, pcr_data: pd.Series, 
-            sector_prices: pd.DataFrame) -> Dict[str, Any]:
+            sector_prices: pd.DataFrame, max_pain: Optional[float] = None, spot_price: Optional[float] = None) -> Dict[str, Any]:
         """
         Main execution method.
         """
@@ -177,6 +179,9 @@ class FlowsEngine:
             'is_absorption': is_absorption,
             'pcr_smooth': round(float(pcr_pct), 4),
             'rs_spread_pct': rs_spread,
+            'max_pain': max_pain,
+            'spot_price': spot_price,
+            'spot_vs_max_pain_pct': round(((spot_price - max_pain) / max_pain * 100), 2) if (spot_price and max_pain) else None,
             'components': {
                 'fii_norm': round(float(fii_norm), 4),
                 'dii_norm': round(float(dii_norm), 4),

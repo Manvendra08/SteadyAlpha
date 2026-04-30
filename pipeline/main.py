@@ -144,6 +144,8 @@ class SteadyAlphaPipeline:
                     dii_flows    = bundle.dii,
                     pcr_data     = bundle.pcr_series,
                     sector_prices= bundle.sectors,
+                    max_pain     = bundle.max_pain,
+                    spot_price   = bundle.spot_price,
                 )
                 flows_state["engine_status"] = gates.flows
 

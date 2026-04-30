@@ -41,33 +41,26 @@ async def get_r360_data_dom(symbol: str = "NIFTY") -> Optional[Dict[str, Any]]:
             # Extra buffer for JS rendering
             await asyncio.sleep(8)
             
-            # 1. Extract PCR
-            pcr_val = None
-            try:
-                # Confirmed selector: div:has-text("Put Call Ratio") b
-                # Wait for the text to be a number (not "--" or "Loading")
-                pcr_el = await page.query_selector('div:has-text("Put Call Ratio") b')
-                if pcr_el:
-                    text = (await pcr_el.inner_text()).strip()
-                    logger.info(f"[r360_scraper] PCR Raw Text: '{text}'")
-                    if text and text.replace(".", "").isdigit():
-                        pcr_val = float(text)
-                        logger.info(f"[r360_scraper] Found direct PCR: {pcr_val}")
+            # 1. Extract PCR, Max Pain, Spot Price using actual class selectors
+            metrics = await page.evaluate('''() => {
+                const pcr_el = document.querySelector(".fno_pcr");
+                const maxpain_el = document.querySelector(".f_fut_maxpain");
+                const spot_el = document.querySelector(".f_fut_spotprice");
                 
-                if not pcr_val:
-                    # Fallback: look for any b that contains a decimal-like string near the text
-                    b_tags = await page.query_selector_all("b")
-                    for b in b_tags:
-                        text = (await b.inner_text()).strip()
-                        if text and text.replace(".", "").isdigit() and "." in text:
-                            # Check if parent has "Put Call Ratio"
-                            parent = await b.evaluate_handle("el => el.parentElement.innerText")
-                            if "Put Call Ratio" in str(parent):
-                                pcr_val = float(text)
-                                logger.info(f"[r360_scraper] Found PCR via parent search: {pcr_val}")
-                                break
-            except Exception as e:
-                logger.debug(f"[r360_scraper] Direct PCR extraction failed: {e}")
+                const parse = (el) => {
+                    if (!el) return null;
+                    const v = parseFloat((el.innerText || el.textContent || "").replace(/,/g, "").trim());
+                    return isNaN(v) ? null : v;
+                };
+                
+                return { pcr: parse(pcr_el), maxPain: parse(maxpain_el), spotPrice: parse(spot_el) };
+            }''')
+            
+            pcr_val = metrics.get('pcr')
+            max_pain_val = metrics.get('maxPain')
+            spot_price_val = metrics.get('spotPrice')
+            
+            logger.info(f"[r360_scraper] DOM Metrics: PCR={pcr_val}, MaxPain={max_pain_val}, Spot={spot_price_val}")
             
             # 2. Extract Option Chain
             rows_data = []
@@ -140,6 +133,8 @@ async def get_r360_data_dom(symbol: str = "NIFTY") -> Optional[Dict[str, Any]]:
                 
             return {
                 "pcr": pcr_val,
+                "max_pain": max_pain_val,
+                "spot_price": spot_price_val,
                 "option_chain": {
                     "symbol": symbol,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -153,10 +148,15 @@ async def get_r360_data_dom(symbol: str = "NIFTY") -> Optional[Dict[str, Any]]:
         finally:
             await browser.close()
 
-def get_r360_pcr_dom(symbol: str = "NIFTY") -> Optional[float]:
-    """Sync wrapper for PCR only."""
+def get_r360_pcr_dom(symbol: str = "NIFTY") -> Optional[Dict[str, Any]]:
+    """Sync wrapper for metrics only."""
     res = asyncio.run(get_r360_data_dom(symbol))
-    return res.get("pcr") if res else None
+    if not res: return None
+    return {
+        "pcr": res.get("pcr"),
+        "max_pain": res.get("max_pain"),
+        "spot_price": res.get("spot_price")
+    }
 
 def get_r360_chain_dom(symbol: str = "NIFTY") -> Optional[Dict[str, Any]]:
     """Sync wrapper for Option Chain only."""

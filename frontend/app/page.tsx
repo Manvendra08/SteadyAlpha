@@ -84,6 +84,8 @@ function buildSourceRegistry(
         usedIn:       meta.usedIn,
         status:       'failed' as const,
         note:         'Not attempted in this run',
+        tradingValid: false,
+        criticality: 'informational',
       };
     }
 
@@ -107,17 +109,18 @@ function buildSourceRegistry(
       usedIn:       meta.usedIn,
       status,
       note,
+      tradingValid: prov.trading_valid ?? false,
+      criticality: prov.criticality ?? 'informational',
     };
   });
 }
 
-function buildValidationChecks(summary: any, vm: Partial<DashboardViewModel>): DashboardViewModel['diagnostics']['validationChecks'] {
+function buildValidationChecks(summary: any, vm: Partial<DashboardViewModel>, sourceRegistry: DashboardViewModel['diagnostics']['sourceRegistry']): DashboardViewModel['diagnostics']['validationChecks'] {
   const checks: DashboardViewModel['diagnostics']['validationChecks'] = [];
   
   // 1. Critical coverage check
-  const sourceReg = summary?.meta?.source_registry ?? [];
-  const criticalLoaded = sourceReg.filter((s: any) => s.scope === 'CRITICAL_FOR_DECISION' && (s.status === 'loaded' || s.status === 'cached')).length || 0;
-  const criticalTotal = sourceReg.filter((s: any) => s.scope === 'CRITICAL_FOR_DECISION').length || 0;
+  const criticalLoaded = sourceRegistry.filter(s => s.criticality === 'CRITICAL_FOR_DECISION' && s.tradingValid).length;
+  const criticalTotal = sourceRegistry.filter(s => s.criticality === 'CRITICAL_FOR_DECISION').length;
   
   checks.push({
     label: 'Critical Dataset Coverage',
@@ -258,7 +261,7 @@ export default async function Home() {
   const sourceRegistry = buildSourceRegistry(latestRun, rawProvenance);
   const totalSources = sourceRegistry.length;
   const freshSources = sourceRegistry.filter(s => s.freshness === 'FRESH').length;
-  const tradingValidSources = sourceRegistry.filter(s => s.sourceType === 'REAL' || s.sourceType === 'HISTORY').length;
+  const tradingValidSources = sourceRegistry.filter(s => s.sourceType === 'REAL' || s.sourceType === 'HISTORY' || s.sourceType === 'SCRAPED').length;
   
   const dataTrustScore = totalSources > 0 ? (freshSources / totalSources) * 100 : 0;
   const tradingReadinessScore = totalSources > 0 ? (tradingValidSources / totalSources) * 100 : 0;
@@ -321,14 +324,14 @@ export default async function Home() {
   const flows: DashboardViewModel['flows'] = {
     bias: flowBias,
     fii5dNet: summary?.flows?.fii_5d_z ?? null,
-    dii5dNet: null,
+    dii5dNet: summary?.flows?.dii_5d_z ?? null,
     pcrOi: summary?.flows?.pcr_smooth ?? null,
-    maxPain: null,
-    spotVsMaxPainPct: null,
+    maxPain: summary?.flows?.max_pain ?? null,
+    spotVsMaxPainPct: summary?.flows?.spot_vs_max_pain_pct ?? null,
     sectorAlignment: 'UNKNOWN',
     freshness: flowsAreMock ? 'FALLBACK' : 'FRESH',
     biasDrivers: summary?.flows
-      ? [`FII Z: ${summary.flows.fii_5d_z?.toFixed(2) ?? '—'}`, `PCR: ${summary.flows.pcr_smooth?.toFixed(2) ?? '—'}`]
+      ? [`FII Z: ${summary.flows.fii_5d_z?.toFixed(2) ?? '—'}`, `PCR: ${summary.flows.pcr_smooth?.toFixed(2) ?? '—'}`, `MaxPain: ${summary.flows.max_pain ?? '—'}`]
       : [],
     engineStatus: summary?.flows ? (flowsAreMock ? 'SIMULATED' : 'READY') : 'FAILED',
     dependency: `FII: ${getProv('fii_flows')?.sourceType ?? 'MISSING'}; PCR: ${getProv('pcr_oi')?.sourceType ?? 'MISSING'}`,
@@ -411,9 +414,9 @@ export default async function Home() {
   const decision: DashboardViewModel['decision'] = {
     label: decisionLabelRaw as any,
     confidencePct: Math.round((summary?.advisor?.confidence ?? 0) * 100),
-    regimeGate: summary?.advisor?.components?.regime?.vote ? 'PASS' : 'FAIL',
-    flowGate: summary?.advisor?.components?.flows?.vote ? 'PASS' : 'FAIL',
-    leadershipGate: summary?.advisor?.components?.leadership?.vote ? 'PASS' : 'FAIL',
+    regimeGate: summary?.advisor?.components?.regime !== undefined ? 'PASS' : 'FAIL',
+    flowGate: summary?.advisor?.components?.flows !== undefined ? 'PASS' : 'FAIL',
+    leadershipGate: summary?.advisor?.components?.leadership !== undefined ? 'PASS' : 'FAIL',
     riskGate: circuitBreaker ? 'FAIL' : 'PASS',
     reasons: summary?.advisor?.score !== undefined ? [`Weighted score: ${Number(summary.advisor.score).toFixed(4)}`] : ['No advisor run data'],
     conflicts: summary?.advisor?.conflict_detected ? ['Directional conflict between engines detected'] : [],
@@ -436,7 +439,7 @@ export default async function Home() {
 
   // ── diagnostics ───────────────────────────────────────────────────────────
   const tempVm = { decision: decision as any, risk: risk as any };
-  const validationChecks = buildValidationChecks(summary, tempVm);
+  const validationChecks = buildValidationChecks(summary, tempVm, sourceRegistry);
   const engineWarnings = buildEngineWarnings(summary);
 
   const diagnostics: DashboardViewModel['diagnostics'] = {

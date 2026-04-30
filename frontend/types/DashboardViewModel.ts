@@ -120,6 +120,8 @@ export type DashboardViewModel = {
       usedIn: string;
       status: 'loaded' | 'fallback' | 'failed' | 'cached' | 'skipped';
       note: string | null;
+      tradingValid: boolean;
+      criticality: string;
     }[];
     validationChecks: {
       label: string;

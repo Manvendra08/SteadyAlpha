@@ -77,22 +77,24 @@ def _try_research360(key: str, category: str) -> Optional[FetchResult]:
     """Rung 1: Research360 public API — FII/DII cash flows."""
     try:
         from pipeline.adapters.research360 import get_fii_dii
-        data = get_fii_dii()
-        if not data:
+        data_list = get_fii_dii()
+        if not data_list:
             return None
 
-        net_val = 0.0
-        if category == "FII":
-            net_val = float(data.get("fii_cash", 0))
-        elif category == "DII":
-            net_val = float(data.get("dii_cash", 0))
-        
-        date_str = data.get("date") # format: YYYY-MMM-DD or similar, assemble_flow expects DD-MMM-YYYY
-        # convert to DD-MMM-YYYY if needed
-        dt = datetime.fromisoformat(data.get("fetched_at").split("T")[0])
-        display_date = dt.strftime("%d-%b-%Y")
+        val_dict = {}
+        for data in data_list:
+            net_val = 0.0
+            if category == "FII":
+                net_val = float(data.get("fii_cash", 0))
+            elif category == "DII":
+                net_val = float(data.get("dii_cash", 0))
+            
+            # format: YYYY-MM-DD
+            dt = datetime.strptime(data.get("date"), "%Y-%b-%d")
+            display_date = dt.strftime("%d-%b-%Y")
+            val_dict[display_date] = net_val
 
-        return _assemble_flow_result(key, net_val, display_date, "research360")
+        return _assemble_flow_result_multi(key, val_dict, "research360")
     except Exception as exc:
         logger.warning(f"[{key}/r360] exception: {exc}")
         return None
@@ -157,6 +159,55 @@ def _try_stealth_mc_scrape(key: str, category: str) -> Optional[FetchResult]:
     except Exception as e:
         logger.warning(f"[{key}/stealth] MC Scrape failed: {e}")
         return None
+
+
+def _assemble_flow_result_multi(key: str, val_dict: dict[str, float], provider: str) -> Optional[FetchResult]:
+    """Helper to merge multiple daily flows into cached series."""
+    meta = cache_read_meta(key)
+    series_data = {}
+    
+    if meta and "payload" in meta and meta["payload"]:
+        try:
+            import json
+            raw_payload = meta["payload"]
+            if isinstance(raw_payload, str):
+                try:
+                    cached_series = pd.read_json(raw_payload, typ="series")
+                    series_data = cached_series.to_dict()
+                except:
+                    series_data = json.loads(raw_payload)
+            elif isinstance(raw_payload, dict):
+                series_data = raw_payload
+        except Exception as e:
+            logger.warning(f"[{key}] Failed to parse cached payload: {e}")
+
+    # Merge all new dates
+    for date_str, val in val_dict.items():
+        series_data[date_str] = val
+        
+    series = pd.Series(series_data)
+    
+    try:
+        series.index = pd.to_datetime(series.index)
+        series = series.sort_index()
+        series.index = series.index.strftime("%d-%b-%Y")
+    except:
+        series = series.sort_index()
+
+    if len(series) > 150:
+        series = series.iloc[-150:]
+        
+    crit = FII_CRITICALITY if key == FII_KEY else DII_CRITICALITY
+    
+    # Use max date from val_dict for market_date
+    latest_date_str = max(val_dict.keys(), key=lambda d: pd.to_datetime(d, errors='coerce')) if val_dict else now_iso()
+    
+    return FetchResult(
+        dataset_key=key, provider=provider, source_type="REAL",
+        freshness="FRESH", criticality=crit, success=True, trading_valid=True,
+        market_date=latest_date_str, fetched_at=now_iso(),
+        record_count=len(series), payload=series
+    )
 
 
 def _assemble_flow_result(key: str, val: float, date_str: str, provider: str) -> Optional[FetchResult]:

@@ -172,6 +172,8 @@ class DataBundle:
 
     # PCR / options
     pcr:      Optional[float]       = None
+    max_pain: Optional[float]       = None
+    spot_price: Optional[float]     = None
     pcr_series: Optional[pd.Series] = None
     option_chain: Optional[Any]     = None
 
@@ -316,6 +318,8 @@ class IngestionOrchestrator:
         r_pcr = results.get("pcr_oi")
         if r_pcr and r_pcr.payload is not None:
             b.pcr = r_pcr.payload.get("pcr_latest")
+            b.max_pain = r_pcr.payload.get("max_pain")
+            b.spot_price = r_pcr.payload.get("spot_price")
 
         # Options chain
         r_chain = results.get("options_chain")
