@@ -22,11 +22,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* Global top nav */}
           <header className="sticky top-0 z-50 bg-[var(--bg-card)] border-b border-[var(--border)] px-6 py-2 flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <span className="font-bold text-[var(--text-primary)] tracking-tight text-sm">⚡ SteadyAlpha</span>
+              <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                <img src="/logo.png" alt="SteadyAlpha" className="h-6 w-auto" />
+                <span className="font-bold text-[var(--text-primary)] tracking-tight text-sm">SteadyAlpha</span>
+              </Link>
               <nav className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
                 <Link href="/" className="hover:text-[var(--text-primary)] transition-colors">Console</Link>
                 <span>·</span>
                 <Link href="/diagnostics" className="hover:text-[var(--text-primary)] transition-colors">Diagnostics</Link>
+                <span>·</span>
+                <Link href="/publication" className="hover:text-[var(--text-primary)] transition-colors text-amber-500 font-bold">Data Hub</Link>
               </nav>
             </div>
             <ThemeToggle />

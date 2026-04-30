@@ -1,10 +1,11 @@
 """
 pipeline/adapters/universe_ohlcv.py
 F&O 200 universe OHLCV source ladder:
-  1. yfinance batched symbol fetch (REAL)
-  2. NSE bhavcopy batch (FALLBACK placeholder)
-  3. Per-symbol cached history (CACHED)
-  4. MISSING if coverage < threshold
+  1. Shoonya primary (PRIMARY)
+  2. yfinance batched symbol fetch (REAL fallback)
+  3. NSE bhavcopy batch (FALLBACK placeholder)
+  4. Per-symbol cached history (CACHED)
+  5. MISSING if coverage < threshold
 
 Criticality: CRITICAL_FOR_DECISION
 """
@@ -54,11 +55,18 @@ def fetch() -> FetchResult:
     end     = datetime.now(timezone.utc)
     start   = end - timedelta(days=LOOKBACK_DAYS)
 
+    # ── Rung 1: yfinance (Primary for Phase 1) ────────────────────────────
     result = _try_yfinance(symbols, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
     if result and result.success:
         cache_write(DATASET_KEY, result)
         return result
 
+    # ── Rung 2: Shoonya/Dhan (Deactivated) ────────────────────────────────
+    # result = _try_shoonya(symbols, LOOKBACK_DAYS)
+    # ...
+
+
+    # ── Rung 3: NSE bhavcopy batch not yet implemented. ────────
     logger.warning("[universe] yfinance failed. NSE bhavcopy batch not yet implemented.")
 
     cached = _try_cache()
@@ -69,6 +77,47 @@ def fetch() -> FetchResult:
         DATASET_KEY, CRITICALITY,
         f"Universe OHLCV: all sources failed for {len(symbols)} symbols",
     )
+
+
+def _try_shoonya(symbols: list[str], lookback_days: int) -> Optional[FetchResult]:
+    """Rung 1: Dhan primary."""
+    try:
+        from pipeline.adapters.dhan_market import get_universe_ohlcv
+        # Strip .NS for Dhan (adjust if Dhan needs different symbols)
+        dhan_syms = [s.replace(".NS", "") for s in symbols]
+        
+        df = get_universe_ohlcv(dhan_syms, lookback_days)
+        if df is None or df.empty:
+            return None
+
+        df = df.dropna(how="all")
+        if len(df) < MIN_ROWS:
+            return None
+
+        # Coverage check
+        coverage = df.notna().any().mean()
+        if coverage < MIN_COVERAGE:
+            logger.warning(f"[universe/dhan] coverage {coverage:.0%} < {MIN_COVERAGE:.0%}")
+            return None
+
+        market_date = df.index[-1].strftime("%Y-%m-%d")
+        return FetchResult(
+            dataset_key   = DATASET_KEY,
+            provider      = "dhan",
+            source_type   = "REAL",
+            freshness     = "FRESH",
+            criticality   = CRITICALITY,
+            success       = True,
+            trading_valid = True,
+            market_date   = market_date,
+            fetched_at    = now_iso(),
+            record_count  = int(df.notna().any().sum()),
+            payload       = {"close": df, "volume": None, "symbols": symbols}, # Volume omitted in universe batch for now
+            warning       = None if coverage > 0.8 else f"Partial Dhan universe: {coverage:.0%}",
+        )
+    except Exception as exc:
+        logger.warning(f"[universe/dhan] exception: {exc}")
+        return None
 
 
 @with_retry(max_attempts=2, base_delay=2.0)

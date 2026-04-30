@@ -30,6 +30,29 @@ class PersistenceManager:
             print(f"Supabase Client Init Failed: {e}")
             raise
 
+    def get_latest_regime_state(self) -> dict:
+        """Fetch the most recent regime state and calculate days_in_state."""
+        try:
+            # Fetch last 50 runs to calculate consecutive days
+            resp = self.supabase.table("regime_history").select("state").order("timestamp", desc=True).limit(50).execute()
+            if not resp or not resp.data:
+                return {"state": "UNKNOWN", "days_in_state": 0}
+            
+            data = resp.data
+            current_state = data[0]["state"]
+            days_in_state = 0
+            
+            for row in data:
+                if row["state"] == current_state:
+                    days_in_state += 1
+                else:
+                    break
+            
+            return {"state": current_state, "days_in_state": days_in_state}
+        except Exception as e:
+            print(f"Error fetching latest regime: {e}")
+            return {"state": "UNKNOWN", "days_in_state": 0}
+
     def insert_run(self, run_id: str, timestamp: str, status: str, duration_ms: int,
                    validity: str = "NO", invalid_reasons: list = [], 
                    paper_allowed: bool = False) -> None:
@@ -72,7 +95,7 @@ class PersistenceManager:
     def insert_signals_summary(self, run_id: str, timestamp: str, 
                                regime: Dict, flows: Dict, 
                                leadership: Dict, risk: Dict, 
-                               advisor: Dict) -> None:
+                               advisor: Dict, previews: list = []) -> None:
         """Insert into signals_summary (JSONB columns)."""
         data = {
             'run_id': run_id,
@@ -82,7 +105,9 @@ class PersistenceManager:
             'leadership': leadership,
             'risk': risk,
             'advisor': advisor,
-            'meta': {}
+            'meta': {
+                'raw_data_previews': previews
+            }
         }
         self.supabase.table('signals_summary').insert(data).execute()
 
@@ -96,7 +121,12 @@ class PersistenceManager:
             'vix_value': regime.get('vix_value'),
             'breadth_pct': regime.get('breadth_pct'),
             'transition_reason': regime.get('transition_reason'),
-            'raw_inputs': regime.get('metrics', {})
+            'raw_inputs': {
+                'trend_z': regime.get('trend_z'),
+                'is_shock': regime.get('is_shock'),
+                'is_transitioning': regime.get('is_transitioning'),
+                'days_in_state': regime.get('days_in_state')
+            }
         }
         self.supabase.table('regime_history').insert(data).execute()
 
@@ -179,7 +209,8 @@ class PersistenceManager:
                 run_id, timestamp_str,
                 clean_result['regime'], clean_result['flows'],
                 clean_result['leadership'], clean_result['risk'],
-                clean_result['advisor']
+                clean_result['advisor'],
+                previews=clean_result.get('raw_data_previews', [])
             )
             
             # 4. History Tables

@@ -41,7 +41,7 @@ class LeadershipEngine:
         RS = Linear Regression Slope of (Stock / Benchmark) over 20 days.
         Normalized to Z-score across universe.
         """
-        if stock_prices.empty or benchmark_prices.empty:
+        if stock_prices is None or benchmark_prices is None or stock_prices.empty or benchmark_prices.empty:
             return pd.Series(dtype=float)
         
         # Align dates
@@ -56,23 +56,21 @@ class LeadershipEngine:
         rs_ratio_series = stocks.divide(bench, axis=0)
         
         # Calculate Slope using linear regression (last 20 days)
-        # We can use numpy's polyfit or a simple covariance/variance formula
-        # slope = cov(x, y) / var(x) where x is time [0..19]
         x = np.arange(self.rs_lookback)
-        x_var = np.var(x)
         
         def get_slope(y_window):
             if len(y_window) < self.rs_lookback: return 0.0
-            y = y_window.values
-            cov = np.cov(x, y)[0, 1]
-            return cov / x_var
+            # Polyfit returns [slope, intercept] for deg=1
+            slope, _ = np.polyfit(x, y_window.values, 1)
+            return slope / y_window.mean() # Normalize by mean to get % slope
             
         slopes = rs_ratio_series.iloc[-self.rs_lookback:].apply(get_slope)
         
         # Normalize to Z-score across universe
-        rs_score = (slopes - slopes.mean()) / slopes.std()
+        from scipy.stats import zscore
+        rs_score = pd.Series(zscore(slopes.fillna(0)), index=slopes.index)
         
-        return rs_score.fillna(0)
+        return rs_score
 
     def calculate_vol_score(self, volume_series: pd.DataFrame) -> pd.Series:
         """
@@ -202,16 +200,23 @@ class LeadershipEngine:
         
         # Quintiles
         q1_thresh = self.quintile_thresholds['q1']
+        q5_thresh = self.quintile_thresholds['q5']
+        
         leaders = filtered_scores[filtered_scores['rank'] >= q1_thresh]
+        laggards = filtered_scores[filtered_scores['rank'] <= q5_thresh]
         
         # 5. Construct Output
         leadership_state = {
             'universe_size': len(stock_prices.columns),
             'leaders_count': len(leaders),
+            'laggards_count': len(laggards),
             'avg_score': round(float(filtered_scores['composite_score'].mean()), 4),
             'top_sectors': [], # Requires sector mapping logic, placeholder
             'blackout_count': len(scores_df) - len(filtered_scores),
-            'details': leaders.head(10).to_dict(orient='index') # Top 10 leaders
+            'details': {
+                'leaders': leaders.sort_values('composite_score', ascending=False).head(10).to_dict(orient='index'),
+                'laggards': laggards.sort_values('composite_score', ascending=True).head(10).to_dict(orient='index')
+            }
         }
         
         return leadership_state

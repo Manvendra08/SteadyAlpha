@@ -8,6 +8,7 @@ import logging
 import pandas as pd
 from typing import Optional
 from .base import FetchResult, CRITICALITY, with_retry, cache_write, cache_read_meta, now_iso
+from .nse_session import fetch_nse_json
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +18,17 @@ CRITICALITY_LEVEL = CRITICALITY["IMPORTANT_NONCRITICAL"]
 def fetch(config: dict) -> FetchResult:
     """
     Source ladder:
-    1. Structured NSE source (nsepython or direct)
-    2. exchange file
-    3. controlled scrape
-    4. cached real snapshot
-    5. else MISSING
+    1. Structured NSE source (stealth)
+    2. Cached real snapshot
+    3. else MISSING
     """
-    # Rung 1-3: TODO
+    # Rung 1: NSE Stealth
+    result = _try_nse_delivery()
+    if result and result.success:
+        cache_write(DATASET_KEY, result)
+        return result
     
-    # Rung 4: CACHED
+    # Rung 2: CACHED
     ttls = config.get("ingestion", {}).get("freshness_ttl_hours", {})
     ttl = ttls.get(DATASET_KEY, 24)
     cached = cache_read_meta(DATASET_KEY, ttl_hours=ttl)
@@ -40,3 +43,26 @@ def fetch(config: dict) -> FetchResult:
         )
         
     return FetchResult.missing(DATASET_KEY, CRITICALITY_LEVEL, "Delivery data unavailable")
+
+def _try_nse_delivery() -> Optional[FetchResult]:
+    """Fetch delivery % for NIFTY-50 proxy (e.g. RELIANCE) to gauge market breadth."""
+    symbol = "RELIANCE"
+    url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}&section=trade_info"
+    
+    data = fetch_nse_json(url)
+    if not data or "securityWiseDP" not in data:
+        return None
+        
+    try:
+        dp = data["securityWiseDP"]
+        del_pct = dp.get("deliveryToTradedQuantity", 0)
+        
+        return FetchResult(
+            dataset_key=DATASET_KEY, provider="nse_stealth", source_type="REAL",
+            freshness="FRESH", criticality=CRITICALITY_LEVEL, success=True, trading_valid=True,
+            market_date=data.get("marketStatus", {}).get("tradeDate"),
+            fetched_at=now_iso(), record_count=1, payload={"delivery_pct": del_pct}
+        )
+    except Exception as e:
+        logger.warning(f"[delivery/nse] parse error: {e}")
+        return None

@@ -27,21 +27,56 @@ REFERENCE_CAP = float(os.getenv("REFERENCE_CAPITAL", "1000000"))  # config fallb
 def fetch() -> FetchResult:
     """Equity / drawdown source ladder."""
 
-    # ── Rung 1: Supabase paper_trades ledger ─────────────────────────────
+    # ── Rung 1: Supabase paper_trades ledger (Primary) ───────────────────
     result = _try_supabase()
     if result and result.success:
         return result
 
     logger.warning("[risk_state] Supabase ledger failed.")
 
-    # ── Rung 2: Broker API (not yet wired) ───────────────────────────────
-    logger.info("[risk_state] Broker equity state not yet implemented.")
+    # ── Rung 2: Dhan (Deactivated) ────────────────────────────────────
+    # result = _try_dhan()
+    # if result and result.success:
+    #     return result
 
     # ── Rung 3: MISSING — do NOT synthesize equity ────────────────────────
     return FetchResult.missing(
         DATASET_KEY, CRITICALITY,
         "Equity/drawdown state unavailable — risk engine cannot gate execution",
     )
+
+
+def _try_dhan() -> Optional[FetchResult]:
+    """Rung 2: Dhan primary."""
+    try:
+        from pipeline.adapters.dhan_market import get_account_equity
+        cash = get_account_equity()
+        if cash is None:
+            return None
+
+        market_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return FetchResult(
+            dataset_key   = DATASET_KEY,
+            provider      = "dhan",
+            source_type   = "REAL",
+            freshness     = "FRESH",
+            criticality   = CRITICALITY,
+            success       = True,
+            trading_valid = True,
+            market_date   = market_date,
+            fetched_at    = now_iso(),
+            record_count  = 1,
+            payload       = {
+                "account_equity": cash,
+                "equity_curve":   pd.Series([cash]),
+                "max_drawdown":   0.0,
+                "trade_count":    0,
+            },
+            warning = "Using Dhan cash limit as account equity — drawdown history unavailable",
+        )
+    except Exception as exc:
+        logger.warning(f"[risk_state/dhan] exception: {exc}")
+        return None
 
 
 def _try_supabase() -> Optional[FetchResult]:

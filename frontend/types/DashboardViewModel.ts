@@ -1,12 +1,14 @@
-export type EngineStatus = 'READY' | 'DEGRADED' | 'SUPPRESSED' | 'WAITING' | 'FAILED';
+export type EngineStatus = 'READY' | 'DEGRADED' | 'SIMULATED' | 'SUPPRESSED' | 'WAITING' | 'FAILED';
 
 export type DashboardViewModel = {
-  systemStatus: 'HEALTHY' | 'DEGRADED' | 'FAILED';
+  pipelineStatus: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'RUNNING';
+  tradingValidity: 'YES' | 'PARTIAL' | 'NO';
   operatingMode: 'SIGNAL_ONLY' | 'PAPER' | 'ASSISTED_LIVE' | 'LIVE_AUTO';
   lastSuccessTs: string;
-  dataFreshness: 'FRESH' | 'STALE' | 'FALLBACK' | 'MISSING';
+  dataTrustScore?: number;
+  tradingReadinessScore?: number;
+  invalidReasons?: string[];
   riskMode: 'ACTIVE' | 'REDUCED' | 'HALTED';
-  degradedReason?: string | null;
 
   regime: {
     state: 'TREND_UP' | 'TREND_DOWN' | 'RANGE_BOUND' | 'TRANSITION' | 'HIGH_VIX' | 'BULLISH' | 'BEARISH' | 'NEUTRAL';
@@ -68,7 +70,7 @@ export type DashboardViewModel = {
   };
 
   decision: {
-    label: 'NO_TRADE' | 'WATCHLIST' | 'LONG_BIAS' | 'SHORT_BIAS' | 'PAPER_ELIGIBLE';
+    label: 'NO_TRADE' | 'WATCHLIST' | 'LONG_BIAS' | 'SHORT_BIAS' | 'PAPER_ELIGIBLE' | 'INVALID_FOR_TRADING';
     confidencePct: number;
     regimeGate: 'PASS' | 'FAIL';
     flowGate: 'PASS' | 'FAIL';
@@ -110,9 +112,10 @@ export type DashboardViewModel = {
       datasetLabel: string;
       provider: string;
       scope: string;
+      sourceType: 'REAL' | 'FALLBACK' | 'SCRAPED' | 'CACHED' | 'MOCK' | 'HISTORY' | 'CONFIG' | 'DERIVED' | 'MISSING';
       marketDate: string | null;
       fetchedAt: string | null;
-      freshness: 'FRESH' | 'STALE' | 'FALLBACK' | 'MISSING';
+      freshness: 'FRESH' | 'STALE' | 'N/A' | 'MISSING';
       recordCount: number | null;
       usedIn: string;
       status: 'loaded' | 'fallback' | 'failed' | 'cached' | 'skipped';

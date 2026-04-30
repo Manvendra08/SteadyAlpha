@@ -113,7 +113,7 @@ class RiskEngine:
         """
         Check if drawdown exceeds circuit breaker limit.
         """
-        if equity_curve.empty or len(equity_curve) < 2:
+        if equity_curve is None or equity_curve.empty or len(equity_curve) < 2:
             return {'active': False, 'drawdown': 0.0, 'limit': self.dd_limit * 100}
 
         # Lookback window

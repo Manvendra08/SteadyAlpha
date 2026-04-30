@@ -25,14 +25,14 @@ class FlowsEngine:
         self.fii_lookback = self.config.get('fii_lookback', 126)
         self.pcr_lookback = self.config.get('pcr_lookback', 63)
         self.pcr_smooth_window = self.config.get('pcr_smooth_window', 5)
-        self.rs_spread_lookback = self.config.get('rs_spread_lookback', 126)
+        self.rs_spread_lookback = 20 # Aligned with leadership RS
         self.weights = self.config.get('weights', {'fii': 0.35, 'dii': 0.15, 'pcr': 0.25, 'rs_spread': 0.25})
 
     def calculate_fii_zscore(self, fii_net_flows: pd.Series) -> float:
         """
         Calculate Z-score of 5-day rolling sum of FII flows over lookback period.
         """
-        if fii_net_flows.empty or len(fii_net_flows) < self.fii_lookback:
+        if fii_net_flows is None or fii_net_flows.empty or len(fii_net_flows) < self.fii_lookback:
             return 0.0
         
         # 5-day rolling sum
@@ -57,7 +57,7 @@ class FlowsEngine:
         """
         Calculate percentile of smoothed PCR within lookback window.
         """
-        if pcr_series.empty or len(pcr_series) < self.pcr_lookback:
+        if pcr_series is None or pcr_series.empty or len(pcr_series) < self.pcr_lookback:
             return 0.5 # Neutral default
         
         # Smooth PCR

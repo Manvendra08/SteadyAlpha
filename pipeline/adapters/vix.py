@@ -1,10 +1,13 @@
 """
 pipeline/adapters/vix.py
 India VIX source ladder:
-  1. yfinance ^INDIAVIX (REAL)
-  2. NSE VIX historical file endpoint (FALLBACK placeholder)
+  1. Research360 /api/market/main-indices (PRIMARY — no broker auth needed)
+  2. yfinance ^INDIAVIX (REAL fallback)
   3. disk cache (CACHED)
   4. MISSING — hardcoded constants FORBIDDEN
+
+FUTURE (pending static IP):
+  Rung 0: Dhan/Shoonya get_vix_latest — blocked (dynamic IP)
 """
 
 import logging
@@ -29,14 +32,17 @@ def fetch(config: dict = {}) -> FetchResult:
     end   = datetime.now(timezone.utc)
     start = end - timedelta(days=30)
 
-    # ── Rung 1: yfinance ──────────────────────────────────────────────────
-    result = _try_yfinance(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+    # ── Rung 1: Research360 (primary — no broker IP lock) ─────────────────
+    result = _try_research360()
     if result and result.success:
         cache_write(DATASET_KEY, result)
         return result
 
-    # ── Rung 2: NSE VIX file (placeholder) ───────────────────────────────
-    logger.warning("[vix] yfinance failed. NSE VIX file endpoint not yet implemented.")
+    # ── Rung 2: yfinance ──────────────────────────────────────────────────
+    result = _try_yfinance(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+    if result and result.success:
+        cache_write(DATASET_KEY, result)
+        return result
 
     # ── Rung 3: disk cache ────────────────────────────────────────────────
     ttls = config.get("ingestion", {}).get("freshness_ttl_hours", {})
@@ -50,6 +56,43 @@ def fetch(config: dict = {}) -> FetchResult:
         DATASET_KEY, CRITICALITY,
         "India VIX unavailable — all sources failed. Hardcoded constants forbidden.",
     )
+
+
+def _try_research360() -> Optional[FetchResult]:
+    """Rung 1: Research360 public API — VIX LTP (no broker IP required)."""
+    try:
+        from pipeline.adapters.research360 import get_india_vix
+        vix = get_india_vix()
+        if vix is None:
+            return None
+
+        if not (MIN_VALUE <= vix <= MAX_VALUE):
+            logger.warning(f"[vix/r360] VIX {vix} out of range")
+            return None
+
+        return FetchResult(
+            dataset_key   = DATASET_KEY,
+            provider      = "research360",
+            source_type   = "REAL",
+            freshness     = "FRESH",
+            criticality   = CRITICALITY,
+            success       = True,
+            trading_valid = True,
+            market_date   = datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            fetched_at    = now_iso(),
+            record_count  = 1,
+            payload       = {"vix_latest": vix, "vix_series": None},
+            warning       = "R360 snapshot: Latest value only, no historical series.",
+        )
+    except Exception as exc:
+        logger.warning(f"[vix/r360] exception: {exc}")
+        return None
+
+
+# FUTURE: Dhan primary (pending static IP)
+def _try_shoonya() -> Optional[FetchResult]:
+    """FUTURE Rung — Dhan/Shoonya (blocked: no static IP). Returns None always."""
+    return None
 
 
 @with_retry(max_attempts=3, base_delay=1.0)

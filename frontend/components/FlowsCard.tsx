@@ -5,95 +5,110 @@ function EngineStatusBadge({ status }: { status: EngineStatus }) {
   const cls = {
     READY: 'text-green-400 bg-green-400/10 border-green-400/30',
     DEGRADED: 'text-amber-400 bg-amber-400/10 border-amber-400/30',
+    SIMULATED: 'text-purple-400 bg-purple-400/10 border-purple-400/30',
     SUPPRESSED: 'text-text-muted bg-bg-elevated border-border-theme',
     WAITING: 'text-blue-400 bg-blue-400/10 border-blue-400/30',
     FAILED: 'text-red-400 bg-red-400/10 border-red-400/30',
   }[status] ?? 'text-text-muted bg-bg-elevated border-border-theme';
 
   return (
-    <span className={`text-[10px] px-2 py-0.5 rounded border font-bold tracking-wide ${cls}`}>
-      {status}
+    <span className={`text-[9px] px-1.5 py-0.5 rounded border font-black tracking-tighter ${cls}`}>
+      {status === 'READY' ? 'PASS' : status}
     </span>
   );
-}
-
-function FreshnessDot({ f }: { f: string }) {
-  const col = f === 'FRESH' ? 'bg-green-400' : f === 'FALLBACK' ? 'bg-amber-400' : 'bg-red-400';
-  return <span className={`inline-block w-1.5 h-1.5 rounded-full ${col} mr-1`} />;
 }
 
 export default function FlowsCard({
   bias, fii5dNet, dii5dNet, pcrOi, maxPain, spotVsMaxPainPct, sectorAlignment,
   freshness, biasDrivers, engineStatus, dependency, impact, warning,
 }: DashboardViewModel['flows']) {
-  const biasColor =
+  const isFailed = engineStatus === 'FAILED' || !bias;
+
+  const biasColor = isFailed ? 'text-text-muted opacity-40' :
     bias === 'BULLISH' ? 'text-green-400' :
     bias === 'BEARISH' ? 'text-red-400' :
     'text-amber-400';
 
   return (
-    <div className="bg-bg-card border border-border-theme rounded-xl p-4 flex flex-col gap-3 hover:border-border-theme/70 transition-colors">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className={`bg-bg-card border rounded-2xl p-5 flex flex-col gap-4 hover:shadow-2xl transition-all duration-300 group ${isFailed ? 'border-red-500/20 grayscale' : 'border-border-theme hover:border-border-theme/70'}`}>
+      {/* Unified Header */}
+      <div className="flex items-center justify-between border-b border-border-theme/50 pb-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-text-muted text-[10px] font-bold uppercase tracking-widest">Flows Engine</h2>
-          <FreshnessDot f={freshness} />
+          <div className="p-1.5 rounded-lg bg-bg-elevated text-purple-400">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+          </div>
+          <h2 className="text-text-primary text-[11px] font-black uppercase tracking-[0.1em]">Flows</h2>
         </div>
         <EngineStatusBadge status={engineStatus} />
       </div>
 
-      {/* Bias hero */}
-      <div className={`text-lg font-bold tracking-tight ${biasColor}`}>{bias}</div>
+      {/* Bias hero - Visual Priority */}
+      <div className="flex flex-col">
+        <div className={`text-2xl font-black tracking-tighter leading-tight ${biasColor}`}>
+          {isFailed ? 'NO DATA' : bias}
+        </div>
+        <div className="flex items-center gap-2 mt-1">
+          <span className={`text-[9px] font-black tracking-widest px-1.5 py-0.5 rounded ${
+            freshness === 'FRESH' ? 'bg-green-400/10 text-green-400' : 'bg-amber-400/10 text-amber-400'
+          }`}>
+            {freshness}
+          </span>
+        </div>
+      </div>
 
-      {/* Metrics */}
-      <div className="space-y-1.5 text-xs text-text-secondary">
-        <div className="flex justify-between">
-          <span className="text-text-muted">FII 5D Net</span>
-          <span className="font-mono">{fii5dNet !== null ? fii5dNet.toFixed(2) : '—'}</span>
+      {/* Metrics - Smaller Mono-spaced */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] text-text-secondary">
+        <div className="flex justify-between border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium">FII 5D</span>
+          <span className="font-mono text-text-primary">{fii5dNet !== null && !isFailed ? fii5dNet.toFixed(2) : '—'}</span>
         </div>
-        <div className="flex justify-between">
-          <span className="text-text-muted">DII 5D Net</span>
-          <span className="font-mono">{dii5dNet !== null ? dii5dNet.toFixed(2) : '—'}</span>
+        <div className="flex justify-between border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium">PCR OI</span>
+          <span className="font-mono text-text-primary">{pcrOi !== null && !isFailed ? pcrOi.toFixed(2) : '—'}</span>
         </div>
-        <div className="flex justify-between">
-          <span className="text-text-muted">PCR OI</span>
-          <span className="font-mono">{pcrOi !== null ? pcrOi.toFixed(2) : '—'}</span>
+        <div className="flex justify-between border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium">Max Pain Δ</span>
+          <span className="font-mono text-text-primary">{spotVsMaxPainPct !== null && !isFailed ? `${spotVsMaxPainPct.toFixed(1)}%` : '—'}</span>
         </div>
-        <div className="flex justify-between">
-          <span className="text-text-muted">Max Pain Δ</span>
-          <span className="font-mono">{spotVsMaxPainPct !== null ? `${spotVsMaxPainPct.toFixed(1)}%` : '—'}</span>
-        </div>
-        <div className="flex justify-between items-center">
-          <span className="text-text-muted">Sector Align</span>
-          <span className={`text-[10px] font-semibold ${
+        <div className="flex justify-between border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium">Alignment</span>
+          <span className={`font-mono ${
             sectorAlignment === 'ALIGNED' ? 'text-green-400' :
             sectorAlignment === 'CONFLICTED' ? 'text-red-400' : 'text-text-muted'
-          }`}>{sectorAlignment}</span>
+          }`}>{isFailed ? '—' : sectorAlignment}</span>
         </div>
       </div>
 
       {/* Drivers */}
-      {biasDrivers.length > 0 && (
-        <div className="text-[10px] text-text-muted space-y-0.5">
-          {biasDrivers.slice(0, 3).map((d, i) => <div key={i}>· {d}</div>)}
+      {biasDrivers.length > 0 && !isFailed && (
+        <div className="bg-bg-elevated/30 rounded-lg p-2 space-y-1">
+          {biasDrivers.slice(0, 2).map((d, i) => (
+            <div key={i} className="text-[10px] text-text-muted flex items-start gap-2">
+              <span className="text-purple-400 font-bold">»</span>
+              <span className="opacity-80">{d}</span>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Dep + Impact */}
-      <div className="border-t border-border-theme pt-2 space-y-1 text-[10px]">
-        <div className="text-text-muted">
-          <span className="font-semibold uppercase tracking-wider opacity-60">Dep · </span>
-          {dependency}
+      {/* Dep + Impact - Neutralized Labels */}
+      <div className="pt-2 space-y-1 text-[10px]">
+        <div className="text-text-muted leading-relaxed">
+          <span className="text-[9px] font-bold uppercase tracking-widest opacity-40">DEP · </span>
+          <span className="text-text-secondary opacity-80">{dependency}</span>
         </div>
-        <div className="text-text-muted">
-          <span className="font-semibold uppercase tracking-wider opacity-60">Impact · </span>
-          {impact}
+        <div className="text-text-muted leading-relaxed">
+          <span className="text-[9px] font-bold uppercase tracking-widest opacity-40">IMPACT · </span>
+          <span className="text-text-secondary opacity-80">{impact}</span>
         </div>
       </div>
 
+      {/* Warning */}
       {warning && (
-        <div className="text-[10px] text-amber-400 bg-amber-400/5 border border-amber-400/20 rounded px-2 py-1">
-          ⚠ {warning}
+        <div className="text-[9px] font-medium text-amber-400/90 bg-amber-400/5 border border-amber-400/20 rounded-lg px-2 py-1.5 flex items-start gap-2">
+          <span>⚠</span> {warning}
         </div>
       )}
     </div>

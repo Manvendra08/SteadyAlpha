@@ -16,14 +16,16 @@ class SourceManager:
     def __init__(self):
         # Define priorities
         self.sources = {
-            'price_data': ['polygon', 'yahoo', 'alpha_vantage'],
+            'price_data': ['dhan', 'polygon', 'yahoo', 'alpha_vantage'],
             'fii_data': ['nse_api', 'moneycontrol_scraper'],
-            'options_data': ['sensibull', 'nse_api'],
-            'vix_data': ['yahoo', 'polygon']
+            'options_data': ['sensibull', 'dhan', 'nse_api'],
+            'vix_data': ['dhan', 'yahoo', 'polygon']
         }
         
         # API Keys (Load from env)
         self.keys = {
+            'dhan_client_id': os.getenv('DHAN_CLIENT_ID'),
+            'dhan_access_token': os.getenv('DHAN_ACCESS_TOKEN'),
             'polygon': os.getenv('POLYGON_API_KEY'),
             'alpha_vantage': os.getenv('AV_API_KEY'),
             'sensibull': os.getenv('SENSIBULL_KEY')

@@ -22,174 +22,96 @@ class RegimeEngine:
             config = yaml.safe_load(f)
             self.config = config.get('regime', {})
         
-        self.trend_weights = self.config.get('trend_weights', {'ema_dist': 0.4, 'ema_slope': 0.3, 'ema_align': 0.3})
-        self.trend_thresholds = self.config.get('trend_thresholds', {'bull': 0.5, 'bear': -0.5})
+        self.min_confirm_days = self.config.get('min_confirm_days', 2)
         self.vix_thresholds = self.config.get('vix_thresholds', {'high': 20.0, 'extreme': 30.0})
-        self.breadth_thresholds = self.config.get('breadth_thresholds', {'bull': 0.6, 'bear': 0.4})
-        self.hysteresis_days = self.config.get('hysteresis_days', 2)
+        self.z_thresholds = {'bull': 0.5, 'bear': -0.5}
 
-    def calculate_ema_metrics(self, close: pd.Series) -> Dict[str, pd.Series]:
+    def calculate_rs_slope_zscore(self, close: pd.Series) -> float:
         """
-        Calculate EMA distance, slope, and alignment.
-        Uses 20, 50, 200 EMAs.
+        Calculate the Z-score of the 20-day RS Slope of the benchmark.
+        Since we don't have a broader benchmark, we use Price Slope normalized over 126 days.
         """
-        ema20 = close.ewm(span=20).mean()
-        ema50 = close.ewm(span=50).mean()
-        ema200 = close.ewm(span=200).mean()
-        
-        # 1. EMA Distance: (Price - EMA50) / EMA50
-        # Normalized to roughly [-1, 1] range using tanh or clipping
-        ema_dist_raw = (close - ema50) / ema50
-        ema_dist = np.tanh(ema_dist_raw * 10) # Scale factor 10 to normalize typical % moves
-        
-        # 2. EMA Slope: Slope of EMA50
-        # Calculated as (EMA50_t - EMA50_t-5) / EMA50_t-5
-        ema_slope_raw = (ema50 - ema50.shift(5)) / ema50.shift(5)
-        ema_slope = np.tanh(ema_slope_raw * 20)
-        
-        # 3. EMA Alignment: Order of EMAs
-        # +1 if 20 > 50 > 200, -1 if 20 < 50 < 200, else 0
-        # Smoothed over time
-        bull_align = (ema20 > ema50) & (ema50 > ema200)
-        bear_align = (ema20 < ema50) & (ema50 < ema200)
-        
-        align_raw = pd.Series(0, index=close.index)
-        align_raw[bull_align] = 1
-        align_raw[bear_align] = -1
-        
-        # Smooth alignment to avoid noise
-        ema_align = align_raw.rolling(window=5).mean()
-        
-        return {
-            'ema_dist': ema_dist,
-            'ema_slope': ema_slope,
-            'ema_align': ema_align
-        }
-
-    def calculate_trend_score(self, metrics: Dict[str, pd.Series]) -> pd.Series:
-        """
-        Weighted combination of EMA metrics.
-        """
-        w_dist = self.trend_weights['ema_dist']
-        w_slope = self.trend_weights['ema_slope']
-        w_align = self.trend_weights['ema_align']
-        
-        trend_score = (
-            w_dist * metrics['ema_dist'] +
-            w_slope * metrics['ema_slope'] +
-            w_align * metrics['ema_align']
-        )
-        return trend_score
-
-    def determine_base_regime(self, trend_score: float) -> str:
-        """
-        Map trend_score to base regime.
-        """
-        if trend_score >= self.trend_thresholds['bull']:
-            return 'BULLISH'
-        elif trend_score <= self.trend_thresholds['bear']:
-            return 'BEARISH'
-        else:
-            return 'RANGE'
-
-    def apply_volatility_modifier(self, base_regime: str, vix: float) -> str:
-        """
-        Append HIGH_VOL if VIX is elevated.
-        """
-        if vix >= self.vix_thresholds['extreme']:
-            return f"VOLATILE_TREND" if base_regime != 'RANGE' else 'VOLATILE_RANGE'
-        elif vix >= self.vix_thresholds['high']:
-            return f"{base_regime}_HIGH_VOL"
-        return base_regime
-
-    def detect_shock(self, close: pd.Series, vix_series: Optional[pd.Series] = None) -> bool:
-        """
-        Detect a market shock.
-        - 1-day return < -2% (for NIFTY)
-        - VIX daily spike > 15%
-        """
-        if len(close) < 2:
-            return False
+        if close is None or len(close) < 126:
+            return 0.0
             
-        daily_ret = close.pct_change().iloc[-1]
-        if daily_ret < -0.02: # 2% drop is a shock for an index
-            return True
-            
-        if vix_series is not None and len(vix_series) >= 2:
-            vix_spike = (vix_series.iloc[-1] - vix_series.iloc[-2]) / vix_series.iloc[-2]
-            if vix_spike > 0.15: # 15% VIX spike
-                return True
-                
-        return False
+        # 20-day rolling slope
+        def get_slope(y):
+            if len(y) < 20: return np.nan
+            x = np.arange(len(y))
+            slope, _ = np.polyfit(x, y, 1)
+            return slope / y.mean() # Percentage slope
 
-    def apply_hysteresis(self, current_state: str, previous_state: str, 
-                         days_in_state: int) -> str:
-        """
-        Prevent rapid flipping.
-        If switching from BULL to BEAR (or vice versa), require hysteresis_days.
-        """
-        if current_state == previous_state:
-            return current_state
-            
-        # Check if transition is major (Bull <-> Bear)
-        is_major_switch = (
-            ('BULLISH' in previous_state and 'BEARISH' in current_state) or
-            ('BEARISH' in previous_state and 'BULLISH' in current_state)
-        )
+        # We need a rolling slope series to calculate Z-score
+        # For performance in a daily run, we only need the latest Z-score
+        # But we need the history of slopes to get mean/std
+        slopes = close.rolling(window=20).apply(get_slope)
         
-        if is_major_switch and days_in_state < self.hysteresis_days:
-            return previous_state # Hold previous state
+        window = slopes.iloc[-126:]
+        mean = window.mean()
+        std = window.std()
+        
+        if std == 0 or pd.isna(std):
+            return 0.0
             
-        return current_state
+        current_slope = slopes.iloc[-1]
+        z_score = (current_slope - mean) / std
+        return round(float(z_score), 4)
 
     def run(self, close: pd.Series, vix: float, breadth_pct: float, 
             previous_state: Optional[str] = None, days_in_state: int = 0) -> Dict[str, Any]:
         """
-        Main execution method.
+        Execute regime detection with Z-score thresholds and hysteresis.
         """
-        # 1. Calculate Metrics
-        metrics = self.calculate_ema_metrics(close)
+        # 1. Calculate Core Signal (RS Slope Z-score)
+        trend_z = self.calculate_rs_slope_zscore(close)
         
-        # Get latest values
-        current_trend_score = metrics['ema_dist'].iloc[-1] * self.trend_weights['ema_dist'] + \
-                              metrics['ema_slope'].iloc[-1] * self.trend_weights['ema_slope'] + \
-                              metrics['ema_align'].iloc[-1] * self.trend_weights['ema_align']
-        
-        # 2. Determine Base Regime
-        base_regime = self.determine_base_regime(current_trend_score)
-        
-        # 3. Apply Volatility
-        final_regime = self.apply_volatility_modifier(base_regime, vix)
-        
-        # 3a. Detect Shock (v0.6.1)
-        # Mocking vix_series for now as we only have scalar vix in run() signature
-        is_shock = self.detect_shock(close)
-        if is_shock:
-            final_regime = "SHOCK"
-        
-        # 4. Apply Hysteresis
+        # 2. Base Classification
+        if trend_z >= self.z_thresholds['bull']:
+            base_regime = 'BULLISH'
+        elif trend_z <= self.z_thresholds['bear']:
+            base_regime = 'BEARISH'
+        else:
+            base_regime = 'RANGE'
+            
+        # 3. Volatility Modifier
+        final_regime = base_regime
+        if vix >= self.vix_thresholds.get('extreme', 30):
+            final_regime = "VOLATILE_TREND" if base_regime != 'RANGE' else 'VOLATILE_RANGE'
+        elif vix >= self.vix_thresholds.get('high', 20):
+            final_regime = f"{base_regime}_HIGH_VOL"
+
+        # 4. Shock Detection
+        is_shock = False
+        if len(close) >= 2:
+            daily_ret = close.pct_change().iloc[-1]
+            if daily_ret < -0.02: # 2% drop is a shock
+                is_shock = True
+                final_regime = "SHOCK"
+
+        # 5. Hysteresis & Confirmation
+        # Only switch if confirmed for X days, unless it's a SHOCK
+        confirmed_regime = final_regime
         is_transitioning = False
-        if previous_state and final_regime != "SHOCK":
-            intended_regime = final_regime
-            final_regime = self.apply_hysteresis(final_regime, previous_state, days_in_state)
-            if final_regime != intended_regime:
-                is_transitioning = True
-                final_regime = "TRANSITION"
         
-        # 5. Construct Output
-        regime_state = {
-            'state': final_regime,
-            'trend_score': round(float(current_trend_score), 4),
+        if previous_state and previous_state != "UNKNOWN" and final_regime != "SHOCK":
+            # If state changed, we check if we have enough days to confirm
+            if final_regime != previous_state:
+                if days_in_state < self.min_confirm_days:
+                    confirmed_regime = previous_state # Hold previous
+                    is_transitioning = True
+        
+        # 6. Output
+        # Normalize trend_score (Z-score) to roughly [-1, 1] for Advisor
+        normalized_trend = float(np.tanh(trend_z))
+        
+        return {
+            'state': confirmed_regime,
+            'trend_score': round(normalized_trend, 4),
+            'trend_z': trend_z,
             'vix_value': round(float(vix), 2),
-            'breadth_pct': round(float(breadth_pct), 4),
-            'components': {
-                'ema_dist': round(float(metrics['ema_dist'].iloc[-1]), 4),
-                'ema_slope': round(float(metrics['ema_slope'].iloc[-1]), 4),
-                'ema_align': round(float(metrics['ema_align'].iloc[-1]), 4)
-            },
-            'transition_reason': 'Shock' if is_shock else ('Hysteresis' if is_transitioning else 'Signal'),
+            'breadth_pct': round(float(breadth_pct), 4) if breadth_pct else 0.0,
+            'is_shock': is_shock,
             'is_transitioning': is_transitioning,
-            'is_shock': is_shock
+            'days_in_state': days_in_state + 1 if confirmed_regime == previous_state else 1,
+            'transition_reason': 'Shock' if is_shock else ('Confirmed' if not is_transitioning else 'Pending Confirmation')
         }
-        
-        return regime_state

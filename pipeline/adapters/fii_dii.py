@@ -1,20 +1,17 @@
 """
 pipeline/adapters/fii_dii.py
-FII + DII cash flow source ladder:
-  1. nsepython (REAL)
-  2. NSE published CSV/endpoint (FALLBACK placeholder)
-  3. Controlled scrape of NSE/moneycontrol table (SCRAPED placeholder)
-  4. Disk cache (CACHED)
-  5. MISSING
+FII + DII cash flow source ladder.
 """
-
 import logging
+import random
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple
 
 import pandas as pd
 
-from pipeline.adapters.base import FetchResult, with_retry, cache_write, cache_read_meta, now_iso
+from pipeline.adapters.base import FetchResult, cache_write, cache_read_meta, now_iso
+from pipeline.adapters.nse_session import get_nse_session
 
 logger = logging.getLogger(__name__)
 
@@ -28,24 +25,26 @@ MIN_ROWS        = 10
 
 def fetch_fii() -> FetchResult:
     """FII cash flows source ladder."""
-    end   = datetime.now(timezone.utc)
-    start = end - timedelta(days=LOOKBACK_DAYS)
-
-    result = _try_nsepython_fii(start.strftime("%d-%m-%Y"), end.strftime("%d-%m-%Y"))
+    # ── Rung 1: Research360 (primary — no broker IP lock) ─────────────────
+    result = _try_research360(FII_KEY, "FII")
     if result and result.success:
         cache_write(FII_KEY, result)
         return result
 
-    logger.warning("[fii] nsepython failed. NSE CSV endpoint not yet implemented.")
+    # ── Rung 2: Stealth NSE API (REAL fallback) ───────────────────────────
+    result = _try_stealth_nse_fiidii(FII_KEY, "FII")
+    if result and result.success:
+        cache_write(FII_KEY, result)
+        return result
 
-    # Rung 3: scrape placeholder
-    scraped = _try_scrape_fii()
-    if scraped and scraped.success:
-        cache_write(FII_KEY, scraped)
-        return scraped
+    # ── Rung 3: Stealth Moneycontrol Scrape ──────────────────────────────
+    result = _try_stealth_mc_scrape(FII_KEY, "FII")
+    if result and result.success:
+        cache_write(FII_KEY, result)
+        return result
 
-    # Rung 4: cache
-    cached = _try_cache_fii()
+    # ── Rung 4: Cache ────────────────────────────────────────────────────
+    cached = _try_cache_flow(FII_KEY, FII_CRITICALITY)
     if cached and cached.success:
         return cached
 
@@ -53,152 +52,174 @@ def fetch_fii() -> FetchResult:
 
 
 def fetch_dii() -> FetchResult:
-    """DII cash flows source ladder (noncritical)."""
-    end   = datetime.now(timezone.utc)
-    start = end - timedelta(days=LOOKBACK_DAYS)
-
-    result = _try_nsepython_dii(start.strftime("%d-%m-%Y"), end.strftime("%d-%m-%Y"))
+    """DII cash flows source ladder."""
+    # ── Rung 1: Research360 (primary) ────────────────────────────────────
+    result = _try_research360(DII_KEY, "DII")
     if result and result.success:
         cache_write(DII_KEY, result)
         return result
 
-    cached = _try_cache_dii()
+    # ── Rung 2: Stealth NSE API ─────────────────────────────────────────
+    result = _try_stealth_nse_fiidii(DII_KEY, "DII")
+    if result and result.success:
+        cache_write(DII_KEY, result)
+        return result
+
+    # ── Rung 3: Cache ────────────────────────────────────────────────────
+    cached = _try_cache_flow(DII_KEY, DII_CRITICALITY)
     if cached and cached.success:
         return cached
 
     return FetchResult.missing(DII_KEY, DII_CRITICALITY, "DII flows: all sources failed")
 
 
-# ─── nsepython attempts ───────────────────────────────────────────────────────
-
-@with_retry(max_attempts=2, base_delay=2.0)
-def _nsepython_fiidii_daily() -> pd.DataFrame:
-    from nsepython import nse_fiidii  # type: ignore
-    df = nse_fiidii("pandas")
-    if df is None or (hasattr(df, "empty") and df.empty):
-        raise ValueError("nse_fiidii returned empty")
-    return df
-
-def _process_daily_fiidii(df_daily: pd.DataFrame, category_pattern: str, key: str, criticality: str) -> Optional[FetchResult]:
+def _try_research360(key: str, category: str) -> Optional[FetchResult]:
+    """Rung 1: Research360 public API — FII/DII cash flows."""
     try:
-        # Filter DII or FII
-        row = df_daily[df_daily["category"].str.contains(category_pattern, case=False, na=False)]
-        if row.empty:
+        from pipeline.adapters.research360 import get_fii_dii
+        data = get_fii_dii()
+        if not data:
+            return None
+
+        net_val = 0.0
+        if category == "FII":
+            net_val = float(data.get("fii_cash", 0))
+        elif category == "DII":
+            net_val = float(data.get("dii_cash", 0))
+        
+        date_str = data.get("date") # format: YYYY-MMM-DD or similar, assemble_flow expects DD-MMM-YYYY
+        # convert to DD-MMM-YYYY if needed
+        dt = datetime.fromisoformat(data.get("fetched_at").split("T")[0])
+        display_date = dt.strftime("%d-%b-%Y")
+
+        return _assemble_flow_result(key, net_val, display_date, "research360")
+    except Exception as exc:
+        logger.warning(f"[{key}/r360] exception: {exc}")
+        return None
+
+
+def _try_stealth_nse_fiidii(key: str, category: str) -> Optional[FetchResult]:
+    """Fetch daily FII/DII from NSE API using stealth session."""
+    url = "https://www.nseindia.com/api/fiidiiTradeReact"
+    try:
+        session = get_nse_session()
+        headers = session.headers.copy()
+        headers.update({
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Referer': 'https://www.nseindia.com/reports/fii-dii',
+            'X-Requested-With': 'XMLHttpRequest',
+        })
+        
+        resp = session.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200:
             return None
         
-        val = float(row.iloc[0]["netValue"])
-        date_str = str(row.iloc[0]["date"])
-        
-        # Load cache to build series
-        meta = cache_read_meta(key)
-        series_data = {}
-        if meta and "payload" in meta:
-            try:
-                cached_series = pd.read_json(meta["payload"], typ="series")
-                series_data = cached_series.to_dict()
-            except:
-                pass
-                
-        series_data[date_str] = val
-        final_series = pd.Series(series_data).sort_index()
-        
-        # Keep last 150 days
-        if len(final_series) > 150:
-            final_series = final_series.iloc[-150:]
-            
-        if len(final_series) < MIN_ROWS:
-            logger.warning(f"[{key}] Only {len(final_series)} rows after appending daily data.")
+        data = resp.json()
+        # Data is a list of objects: [{"category": "FII", "date": "28-Apr-2026", "buyValue": 100, "sellValue": 80, "netValue": 20}, ...]
+        match = next((x for x in data if category in x.get("category", "").upper()), None)
+        if not match:
             return None
             
-        return FetchResult(
-            dataset_key   = key,
-            provider      = "nsepython_daily",
-            source_type   = "REAL",
-            freshness     = "FRESH",
-            criticality   = criticality,
-            success       = True,
-            trading_valid = True,
-            market_date   = date_str,
-            fetched_at    = now_iso(),
-            record_count  = len(final_series),
-            payload       = final_series,
-        )
-    except Exception as exc:
-        logger.error(f"[{key}] failed to process daily append: {exc}")
+        net_val = float(match["netValue"])
+        date_str = match["date"] # e.g. "28-Apr-2026"
+        
+        return _assemble_flow_result(key, net_val, date_str, "nse_stealth")
+    except Exception as e:
+        logger.warning(f"[{key}/stealth] NSE API failed: {e}")
         return None
 
-def _try_nsepython_fii(start_str: str, end_str: str) -> Optional[FetchResult]:
+
+def _try_stealth_mc_scrape(key: str, category: str) -> Optional[FetchResult]:
+    """Scrape Moneycontrol with stealth headers."""
+    from bs4 import BeautifulSoup
+    url = "https://www.moneycontrol.com/india/indexprop/market_stats.php"
     try:
-        df_daily = _nsepython_fiidii_daily()
-        return _process_daily_fiidii(df_daily, "FII", FII_KEY, FII_CRITICALITY)
-    except ImportError:
-        logger.warning("[fii] nsepython not installed. Skipping.")
+        session = get_nse_session() # Re-use session for general browser mimicry
+        headers = session.headers.copy()
+        headers['Referer'] = "https://www.google.com"
+        
+        resp = session.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200: return None
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        table = soup.find('table', {'class': 'mctable1'})
+        if not table: return None
+        
+        # Simple heuristic: find row containing category and extract 3rd column
+        rows = table.find_all('tr')
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 3 and category in cols[0].text.upper():
+                val = float(cols[2].text.replace(',', '').strip())
+                date_str = datetime.now(timezone.utc).strftime("%d-%b-%Y")
+                return _assemble_flow_result(key, val, date_str, "mc_stealth")
         return None
-    except Exception as exc:
-        logger.error(f"[fii] nsepython exception: {exc}")
+    except Exception as e:
+        logger.warning(f"[{key}/stealth] MC Scrape failed: {e}")
         return None
 
-def _try_nsepython_dii(start_str: str, end_str: str) -> Optional[FetchResult]:
+
+def _assemble_flow_result(key: str, val: float, date_str: str, provider: str) -> Optional[FetchResult]:
+    """Helper to merge daily flow into cached series."""
+    meta = cache_read_meta(key)
+    series_data = {}
+    
+    if meta and "payload" in meta and meta["payload"]:
+        try:
+            import json
+            raw_payload = meta["payload"]
+            if isinstance(raw_payload, str):
+                # Try to load as pandas series JSON or plain dict JSON
+                try:
+                    cached_series = pd.read_json(raw_payload, typ="series")
+                    series_data = cached_series.to_dict()
+                except:
+                    series_data = json.loads(raw_payload)
+            elif isinstance(raw_payload, dict):
+                series_data = raw_payload
+        except Exception as e:
+            logger.warning(f"[{key}] Failed to parse cached payload: {e}")
+
+    # Standardize date format for index (DD-MMM-YYYY)
+    series_data[date_str] = val
+    series = pd.Series(series_data)
+    
+    # Try to convert index to datetime for proper sorting
     try:
-        df_daily = _nsepython_fiidii_daily()
-        return _process_daily_fiidii(df_daily, "DII", DII_KEY, DII_CRITICALITY)
-    except ImportError:
-        return None
-    except Exception as exc:
-        logger.error(f"[dii] nsepython exception: {exc}")
-        return None
+        series.index = pd.to_datetime(series.index)
+        series = series.sort_index()
+        # Convert back to strings for JSON serializability
+        series.index = series.index.strftime("%d-%b-%Y")
+    except:
+        series = series.sort_index()
 
-
-# ─── Scrape placeholder ───────────────────────────────────────────────────────
-
-def _try_scrape_fii() -> Optional[FetchResult]:
-    """
-    Controlled scrape of NSE/moneycontrol FII table.
-    TODO: implement HTML parsing with requests + BeautifulSoup.
-    Must: validate schema after parse, mark SCRAPED, persist parse timestamp.
-    """
-    logger.info("[fii] Scrape fallback not yet implemented.")
-    return None
-
-
-# ─── Cache fallbacks ──────────────────────────────────────────────────────────
-
-def _try_cache_fii() -> Optional[FetchResult]:
-    meta = cache_read_meta(FII_KEY)
-    if not meta:
-        return None
-    logger.warning("[fii] Using CACHED FII snapshot")
+    if len(series) > 150:
+        series = series.iloc[-150:]
+        
+    crit = FII_CRITICALITY if key == FII_KEY else DII_CRITICALITY
+    
     return FetchResult(
-        dataset_key   = FII_KEY,
-        provider      = "cache",
-        source_type   = "CACHED",
-        freshness     = "STALE",
-        criticality   = FII_CRITICALITY,
-        success       = True,
-        trading_valid = False,
-        market_date   = meta.get("market_date"),
-        fetched_at    = now_iso(),
-        record_count  = meta.get("record_count"),
-        payload       = None,
-        warning       = f"Stale FII cache from {meta.get('fetched_at', 'unknown')}",
+        dataset_key=key, provider=provider, source_type="REAL",
+        freshness="FRESH", criticality=crit, success=True, trading_valid=True,
+        market_date=date_str, fetched_at=now_iso(),
+        record_count=len(series), payload=series
     )
 
 
-def _try_cache_dii() -> Optional[FetchResult]:
-    meta = cache_read_meta(DII_KEY)
-    if not meta:
-        return None
+def _try_cache_flow(key: str, criticality: str) -> Optional[FetchResult]:
+    meta = cache_read_meta(key)
+    if not meta: return None
+    
+    # Check if we can consider this "STALE" but acceptable for non-critical gating
+    # For FII, we might want it to be FRESH for a valid run, but if everything fails,
+    # we return it with success=True but trading_valid=False.
+    
     return FetchResult(
-        dataset_key   = DII_KEY,
-        provider      = "cache",
-        source_type   = "CACHED",
-        freshness     = "STALE",
-        criticality   = DII_CRITICALITY,
-        success       = True,
-        trading_valid = False,
-        market_date   = meta.get("market_date"),
-        fetched_at    = now_iso(),
-        record_count  = meta.get("record_count"),
-        payload       = None,
-        warning       = "Stale DII cache",
+        dataset_key=key, provider=meta.get("provider", "cache"),
+        source_type="CACHED", freshness=meta.get("freshness", "STALE"),
+        criticality=criticality, success=True, 
+        trading_valid=False, # Cache is never valid for live trading signals
+        market_date=meta.get("market_date"), fetched_at=meta.get("fetched_at"),
+        record_count=meta.get("record_count"), payload=None,
+        warning=f"Using stale cache from {meta.get('fetched_at', 'unknown')}"
     )

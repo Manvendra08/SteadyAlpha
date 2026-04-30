@@ -11,6 +11,14 @@ Responsibilities:
 """
 
 import logging
+import sys
+from pathlib import Path
+
+# Add project root to sys.path for absolute imports
+root = Path(__file__).resolve().parent.parent
+if str(root) not in sys.path:
+    sys.path.append(str(root))
+
 import yaml
 import pandas as pd
 from datetime import datetime, timezone
@@ -109,13 +117,16 @@ class SteadyAlphaPipeline:
                 }
             else:
                 # Previous regime from Supabase (or UNKNOWN if first run)
-                prev_state = "BULLISH"  # TODO: query regime_history table
+                prev_state_dict = self.db.get_latest_regime_state() if self.db else {"state": "UNKNOWN", "days_in_state": 0}
+                prev_state = prev_state_dict.get("state", "UNKNOWN")
+                days_in_state = prev_state_dict.get("days_in_state", 0)
+
                 regime_state = self.regime_engine.run(
                     close          = bundle.close,
                     vix            = bundle.vix if bundle.vix is not None else None,
                     breadth_pct    = bundle.breadth_pct if bundle.breadth_pct is not None else None,
                     previous_state = prev_state,
-                    days_in_state  = 1,
+                    days_in_state  = days_in_state,
                 )
                 regime_state["engine_status"] = gates.regime
 
@@ -242,6 +253,34 @@ class SteadyAlphaPipeline:
 
             # ── 9. Consolidate results + provenance ───────────────────────
             provenance = build_provenance(bundle)
+            
+            # Build raw data previews for v0.7.0 Evidence Drawer
+            raw_data_previews = []
+            if bundle.close is not None:
+                df_tail = bundle.close.to_frame("Close").tail(5).reset_index()
+                df_tail.columns = ["Date", "Close"]
+                raw_data_previews.append({
+                    "label": "Nifty OHLCV (Tail)",
+                    "provider": bundle.results.get("nifty_ohlcv").provider if "nifty_ohlcv" in bundle.results else "unknown",
+                    "fetchedAt": bundle.results.get("nifty_ohlcv").fetched_at if "nifty_ohlcv" in bundle.results else None,
+                    "marketDate": bundle.results.get("nifty_ohlcv").market_date if "nifty_ohlcv" in bundle.results else None,
+                    "recordCount": bundle.results.get("nifty_ohlcv").record_count if "nifty_ohlcv" in bundle.results else None,
+                    "rows": df_tail.to_dict("records"),
+                    "usedInRun": bundle.engine_gates.regime in ("READY", "DEGRADED")
+                })
+            
+            if bundle.fii is not None:
+                df_fii = bundle.fii.to_frame("NetValue").tail(3).reset_index()
+                df_fii.columns = ["Date", "NetValue"]
+                raw_data_previews.append({
+                    "label": "FII Flows (Tail)",
+                    "provider": bundle.results.get("fii_flows").provider if "fii_flows" in bundle.results else "unknown",
+                    "fetchedAt": bundle.results.get("fii_flows").fetched_at if "fii_flows" in bundle.results else None,
+                    "marketDate": bundle.results.get("fii_flows").market_date if "fii_flows" in bundle.results else None,
+                    "recordCount": bundle.results.get("fii_flows").record_count if "fii_flows" in bundle.results else None,
+                    "rows": df_fii.to_dict("records"),
+                    "usedInRun": bundle.engine_gates.flows in ("READY", "DEGRADED")
+                })
 
             results = {
                 "run_id":         run_id,
@@ -250,6 +289,7 @@ class SteadyAlphaPipeline:
                 "invalid_reasons":bundle.invalid_reasons,
                 "sandbox_mode":   bundle.sandbox_mode,
                 "provenance":     provenance,
+                "raw_data_previews": raw_data_previews,
                 "regime":         regime_state,
                 "flows":          flows_state,
                 "leadership":     leadership_state,
@@ -258,6 +298,7 @@ class SteadyAlphaPipeline:
                 "advisor":        advisor_state,
                 "paper_orders":   paper_orders,
                 "paper_trades":   paper_trades,
+                "paper_promotion_allowed": bundle.run_validity != "NO",
             }
 
             # ── 10. Persist ───────────────────────────────────────────────

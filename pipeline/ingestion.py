@@ -241,6 +241,11 @@ class IngestionOrchestrator:
         results["delivery"]       = _delivery.fetch({})
 
         # ── 2. Log summary ─────────────────────────────────────────────────
+        # Ensure all results are FetchResult objects (prevent NoneType crashes)
+        for k in ["nifty_ohlcv", "india_vix", "fii_flows", "dii_flows", "pcr_oi", "options_chain", "sector_indices", "universe_ohlcv", "equity_curve", "delivery"]:
+            if results.get(k) is None:
+                results[k] = FetchResult.missing(k, "IMPORTANT_NONCRITICAL", "Adapter returned None")
+
         self._log_summary(results)
 
         # ── 3. Compute run validity ────────────────────────────────────────
@@ -367,10 +372,13 @@ class IngestionOrchestrator:
     def _log_summary(results: Dict[str, FetchResult]) -> None:
         logger.info("[ingestion] ─── Dataset Summary ───────────────────")
         for key, r in results.items():
+            if r is None:
+                logger.warning(f"[ingestion] Dataset {key} is None!")
+                continue
             icon = "✓" if r.trading_valid else ("⚠" if r.success else "✗")
             logger.info(
                 f"[ingestion] {icon} {key:<22} "
-                f"{r.source_type:<10} {r.freshness:<8} "
+                f"{(r.source_type or '???'):<10} {(r.freshness or '???'):<8} "
                 f"valid={r.trading_valid} rows={r.record_count or '—'}"
                 + (f" WARN:{r.warning}" if r.warning else "")
                 + (f" ERR:{r.error}" if r.error else "")

@@ -1,58 +1,121 @@
 """
 pipeline/adapters/nse_session.py
-Resilient custom session for NSE APIs.
-Fetches homepage first to establish cookies, then hits the target endpoint.
+Resilient "Stealth" session for NSE APIs.
+Implements browser mimicry, User-Agent rotation, and automatic cookie management.
 """
 import requests
 import logging
 import time
+import random
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-HEADERS = {
-    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'accept-language': 'en-US,en;q=0.9,en-IN;q=0.8',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
-    'priority': 'u=0, i',
-    'sec-ch-ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"Windows"',
-    'sec-fetch-dest': 'document',
-    'sec-fetch-mode': 'navigate',
-    'sec-fetch-site': 'none',
-    'sec-fetch-user': '?1',
-    'upgrade-insecure-requests': '1',
-}
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+]
 
-_SESSION = None
-_LAST_INIT = 0
+class StealthSession(requests.Session):
+    """
+    A requests.Session subclass that mimics a real browser.
+    Automatically handles the 'Cookie Dance' with the NSE homepage.
+    """
+    def __init__(self):
+        super().__init__()
+        self.ua = random.choice(USER_AGENTS)
+        self.headers.update({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'User-Agent': self.ua,
+            'Connection': 'keep-alive',
+            'Sec-Ch-Ua': '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+        })
+        self._last_init = 0
+        self._init_success = False
 
-def get_nse_session() -> requests.Session:
-    global _SESSION, _LAST_INIT
-    now = time.time()
-    # Refresh session every 5 minutes to avoid stale cookies
-    if _SESSION is None or (now - _LAST_INIT) > 300:
-        _SESSION = requests.Session()
-        _SESSION.headers.update(HEADERS)
+    def initialize(self) -> bool:
+        """Fetch homepage and major landing pages to establish valid session cookies."""
+        now = time.time()
+        if self._init_success and (now - self._last_init) < 300:
+            return True
+
         try:
-            logger.info("[nse_session] Initializing NSE session (fetching homepage cookies)...")
-            _SESSION.get("https://www.nseindia.com", timeout=10)
-            _SESSION.get("https://www.nseindia.com/option-chain", timeout=10)
-        except Exception as e:
-            logger.warning(f"[nse_session] Failed to initialize session: {e}")
-        _LAST_INIT = now
-    return _SESSION
+            logger.info(f"[nse_session] Warming up stealth session (UA: {self.ua})...")
+            self.cookies.clear()
+            
+            # 1. Hit homepage
+            self.get("https://www.nseindia.com", timeout=10)
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            # 2. Hit the Option Chain landing page
+            self.get("https://www.nseindia.com/option-chain", timeout=10)
+            time.sleep(random.uniform(0.5, 1.0))
 
-def fetch_nse_api(url: str, referer: str = "https://www.nseindia.com") -> dict:
-    """Fetch JSON from NSE API using the resilient session."""
-    session = get_nse_session()
-    headers = session.headers.copy()
-    headers["accept"] = "application/json, text/javascript, */*; q=0.01"
-    headers["sec-fetch-dest"] = "empty"
-    headers["sec-fetch-mode"] = "cors"
-    headers["sec-fetch-site"] = "same-origin"
-    headers["referer"] = referer
-    
-    resp = session.get(url, headers=headers, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+            # 3. Hit the Derivatives landing page (specifically for NIFTY)
+            self.get("https://www.nseindia.com/get-quotes/derivatives?symbol=NIFTY", timeout=10)
+            time.sleep(random.uniform(0.5, 1.0))
+            
+            self._last_init = now
+            self._init_success = True
+            logger.info("[nse_session] Stealth session initialized successfully.")
+            return True
+        except Exception as e:
+            logger.warning(f"[nse_session] Failed to warm up session: {e}")
+            self._init_success = False
+            return False
+
+_GLOBAL_SESSION: Optional[StealthSession] = None
+
+def get_nse_session() -> StealthSession:
+    """Singleton getter for the global stealth session."""
+    global _GLOBAL_SESSION
+    if _GLOBAL_SESSION is None:
+        _GLOBAL_SESSION = StealthSession()
+    _GLOBAL_SESSION.initialize()
+    return _GLOBAL_SESSION
+
+def fetch_nse_json(url: str, referer: str = "https://www.nseindia.com") -> Optional[Dict[str, Any]]:
+    """Fetch JSON from NSE with full stealth headers."""
+    try:
+        session = get_nse_session()
+        headers = session.headers.copy()
+        headers.update({
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': referer,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+        })
+        
+        time.sleep(random.uniform(0.8, 1.5))
+        
+        resp = session.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            logger.warning(f"[nse_session] HTTP {resp.status_code} for {url}. Text: {resp.text[:200]}")
+            return None
+            
+        try:
+            res = resp.json()
+            if not res and "/api/option-chain" in url:
+                 logger.warning(f"[nse_session] NSE returned empty JSON for {url}. Possible silent block.")
+            return res
+        except Exception as je:
+            logger.error(f"[nse_session] JSON decode failed for {url}. Text: {resp.text[:200]}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"[nse_session] Request exception for {url}: {e}")
+        return None
