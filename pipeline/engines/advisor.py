@@ -1,18 +1,20 @@
 """
 SteadyAlpha Advisor
 Spec Section 5: Signal Integration & Recommendation
-Final Tuning Spec v1.2 Implemented
+Final Tuning Spec v1.2 + Paper Trade Generation Tuning v0.7.1
 
 Responsibilities:
 1. Aggregate signals from Regime, Flows, and Leadership engines.
 2. Separate engine validity from directional contribution.
 3. Split confidence math from final action mapping.
 4. Generate semantically precise decision summaries.
+5. Orchestrate candidate generation for paper trading.
 """
 
 import yaml
 import numpy as np
 from typing import Dict, Any, List, Optional
+from pipeline.engines.candidates import CandidatesEngine
 
 class Advisor:
     def __init__(self, config_path: str = "config/default.yaml"):
@@ -31,6 +33,9 @@ class Advisor:
         self.promotion_floor = self.paper_config.get('min_confidence', 0.18)
         if self.promotion_floor > 1.0: # If in pct format (e.g. 18.0)
             self.promotion_floor /= 100.0
+        
+        # Paper Trade Generation Tuning v0.7.1: Candidates Engine
+        self.candidates_engine = CandidatesEngine(config_path)
 
     def get_engine_votes(self, regime_state: Dict[str, Any], flows_state: Dict[str, Any], 
                          leadership_state: Dict[str, Any], risk_state: Dict[str, Any]) -> Dict[str, str]:
@@ -75,7 +80,7 @@ class Advisor:
 
     def run(self, regime_state: Dict[str, Any], flows_state: Dict[str, Any], 
             leadership_state: Dict[str, Any], risk_state: Dict[str, Any],
-            mode: str = 'PAPER') -> Dict[str, Any]:
+            mode: str = 'PAPER', run_validity: str = 'YES') -> Dict[str, Any]:
         
         # 1. Engine Validity & Votes
         votes = self.get_engine_votes(regime_state, flows_state, leadership_state, risk_state)
@@ -104,6 +109,16 @@ class Advisor:
             regime_score * self.w_regime +
             flows_score * self.w_flows +
             leadership_score * self.w_leadership
+        )
+        
+        # 3b. Paper Trade Generation Tuning v0.7.1: Generate Candidates
+        regime_vote = votes['regime']
+        candidates_state = self.candidates_engine.run(
+            leadership_state=leadership_state,
+            regime_vote=regime_vote,
+            flows_state=flows_state,
+            risk_state=risk_state,
+            run_validity=run_validity
         )
         
         # 4. Action Confidence (Execution Quality)
@@ -202,5 +217,15 @@ class Advisor:
                 'promotion_threshold_met': action_confidence >= self.promotion_floor,
                 'alignment_bonus': round(float(alignment_score), 2),
                 'blocking_reason': blocking_reason
-            }
+            },
+            # Paper Trade Generation Tuning v0.7.1: Candidate Generation Output (Section 10)
+            'paper_generation_state': candidates_state['paper_generation_state'],
+            'candidate_count': candidates_state['candidate_count'],
+            'promotion_qualified_count': candidates_state['promotion_qualified_count'],
+            'strong_promotion_count': candidates_state['strong_promotion_count'],
+            'top_candidate_symbol': candidates_state['top_candidate_symbol'],
+            'top_candidate_score': candidates_state['top_candidate_score'],
+            'top_promotable_symbol': candidates_state['top_promotable_symbol'],
+            'candidates_detail': candidates_state
         }
+

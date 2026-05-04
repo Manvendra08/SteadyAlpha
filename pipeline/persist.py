@@ -170,6 +170,42 @@ class PersistenceManager:
         }
         self.supabase.table('risk_history').insert(data).execute()
 
+    def insert_paper_candidates(self, run_id: str, timestamp: str, candidates_state: Dict) -> None:
+        """
+        Insert paper candidates from candidate generation (Paper Trade Generation Tuning v0.7.1).
+        Inserts ranked candidate list with scores and promotion eligibility.
+        """
+        candidates = candidates_state.get('all_candidates_ranked', [])
+        if not candidates:
+            return
+        
+        rows = []
+        for candidate in candidates:
+            rows.append({
+                'run_id': run_id,
+                'timestamp': timestamp,
+                'symbol': candidate.get('symbol'),
+                'direction': candidate.get('direction', 'UNKNOWN'),
+                'candidate_score': float(candidate.get('candidate_score', 0.0)),
+                'promotion_score': float(candidate.get('promotion_score', 0.0)),
+                'leadership_score': float(candidate.get('leadership_score', 0.0)),
+                'regime_alignment': float(candidate.get('regime_alignment', 0.0)),
+                'flow_modifier': float(candidate.get('flow_modifier', 0.0)),
+                'volume_confirmation': float(candidate.get('volume_confirmation', 0.0)),
+                'execution_context': float(candidate.get('execution_context', 0.0)),
+                'promotion_eligible': bool(candidate.get('promotion_eligible', False)),
+                'strong_promotion_eligible': bool(candidate.get('strong_promotion_eligible', False)),
+                'candidate_status': 'promoted' if candidate.get('promotion_eligible') else 'generated',
+                'block_reason': None,
+                'components': candidate.get('components', {})
+            })
+        
+        if rows:
+            try:
+                self.supabase.table('paper_candidates').insert(rows).execute()
+            except Exception as e:
+                print(f"Warning: Failed to insert paper candidates: {e}")
+
     def persist_full_run(self, result: Dict[str, Any], duration_ms: int) -> None:
         """
         Master persistence method.
@@ -218,6 +254,10 @@ class PersistenceManager:
             self.insert_flows_history(run_id, timestamp_str, clean_result['flows'])
             self.insert_leadership_history(run_id, timestamp_str, clean_result['leadership'])
             self.insert_risk_history(run_id, timestamp_str, clean_result['risk'])
+            
+            # 4b. Paper Candidates (Paper Trade Generation Tuning v0.7.1)
+            if 'advisor' in clean_result and 'candidates_detail' in clean_result['advisor']:
+                self.insert_paper_candidates(run_id, timestamp_str, clean_result['advisor']['candidates_detail'])
             
             # 5. Paper Execution
             if 'paper_orders' in clean_result:

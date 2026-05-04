@@ -211,6 +211,7 @@ class SteadyAlphaPipeline:
                 leadership_state= leadership_state,
                 risk_state      = risk_state,
                 mode            = mode,
+                run_validity    = bundle.run_validity,  # Paper Trade Generation Tuning v0.7.1
             )
 
             # Override label if run is not trading-valid

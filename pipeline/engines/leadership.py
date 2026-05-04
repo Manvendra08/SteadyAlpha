@@ -36,6 +36,13 @@ class LeadershipEngine:
             'sma200_above': True,
             'earnings_blackout_days': 3
         })
+        
+        # Paper Trade Generation Tuning (v0.7.1): Candidate & Promotion Thresholds
+        self.coverage_min_for_candidate_generation = self.config.get('coverage_min_for_candidate_generation', 0.45)
+        self.coverage_min_for_promotion = self.config.get('coverage_min_for_promotion', 0.60)
+        self.candidate_score_min = self.config.get('candidate_score_min', 0.05)
+        self.promotion_score_min = self.config.get('promotion_score_min', 0.18)
+        self.strong_promotion_score_min = self.config.get('strong_promotion_score_min', 0.30)
 
     def calculate_rs_score(self, stock_prices: pd.DataFrame, benchmark_prices: pd.Series) -> pd.Series:
         """
@@ -150,21 +157,61 @@ class LeadershipEngine:
         # 5. Apply Filters
         filtered_scores = self.apply_filters(scores_df, stock_prices, earnings_dates)
         
+        universe_size = len(stock_prices.columns)
         if filtered_scores.empty:
-            return {'leaders_count': 0, 'universe_size': len(stock_prices.columns), 'avg_score': 0, 'engine_status': 'READY'}
+            # No candidates at all
+            return {
+                'universe_size': universe_size,
+                'filtered_count': 0,
+                'coverage_pct': 0.0,
+                'coverage_threshold_candidate': self.coverage_min_for_candidate_generation,
+                'coverage_threshold_promotion': self.coverage_min_for_promotion,
+                'leaders_count': 0,
+                'laggards_count': 0,
+                'qualifying_candidates_count': 0,
+                'qualifying_promotion_count': 0,
+                'avg_score': 0.0,
+                'breadth_pct': 0.0,
+                'engine_status': 'READY',
+                'validity_status': 'DEGRADED',
+                'directional_vote': 'NO_QUALIFIERS',
+                'paper_generation_state': 'NO_CANDIDATES',
+                'top_candidates': [],
+                'top_promotable_candidates': [],
+                'thresholds': {
+                    'min_coverage_pct': self.coverage_min_for_candidate_generation,
+                    'min_leaders_for_vote': 1
+                },
+                'details': {
+                    'leaders': {},
+                    'laggards': {},
+                    'candidates': {},
+                    'promotable': {}
+                }
+            }
             
         # 6. Rank & Quintiles (using Z-scores)
         filtered_scores['rank'] = filtered_scores['composite_z'].rank(pct=True)
+        
+        # Paper Trade Generation Tuning: Separate candidate and promotion lists
+        # Candidates are ANY symbols that pass loose quality threshold
+        candidates = filtered_scores[filtered_scores['composite_raw'] > self.candidate_score_min].copy()
+        candidates['candidate_score'] = candidates['composite_raw']
+        
+        # Promotion-qualified are top-tier symbols
+        promotable = filtered_scores[filtered_scores['composite_raw'] > self.promotion_score_min].copy()
+        promotable['promotion_score'] = promotable['composite_raw']
         
         # Leaders are Top Quintile AND must have positive raw composite
         leaders = filtered_scores[(filtered_scores['rank'] >= 0.8) & (filtered_scores['composite_raw'] > 0.1)]
         laggards = filtered_scores[(filtered_scores['rank'] <= 0.2) & (filtered_scores['composite_raw'] < -0.1)]
         
-        # 7. Construct Output
-        universe_size = len(stock_prices.columns)
+        # 7. Construct Output with candidate generation state
         coverage_pct = round(len(filtered_scores) / universe_size, 4) if universe_size > 0 else 0.0
+        coverage_for_candidates = round(len(candidates) / universe_size, 4) if universe_size > 0 else 0.0
+        coverage_for_promotion = round(len(promotable) / universe_size, 4) if universe_size > 0 else 0.0
         
-        # Spec 1.1: Directional Vote logic
+        # Spec 1.1: Directional Vote logic (unchanged for backward compat)
         directional_vote = "NEUTRAL"
         if len(leaders) > len(laggards) and len(leaders) >= 1:
             directional_vote = "LONG"
@@ -174,25 +221,46 @@ class LeadershipEngine:
             directional_vote = "NO_QUALIFIERS"
         else:
             directional_vote = "WEAK"
-
+        
+        # Paper generation state (Section 8)
+        paper_generation_state = "NO_CANDIDATES"
+        if len(candidates) > 0 and len(promotable) > 0:
+            paper_generation_state = "CANDIDATES_FOUND_PROMOTION_QUALIFIED"
+        elif len(candidates) > 0:
+            paper_generation_state = "CANDIDATES_FOUND"
+        
         leadership_state = {
             'universe_size': universe_size,
             'filtered_count': len(filtered_scores),
             'coverage_pct': coverage_pct,
+            'coverage_threshold_candidate': self.coverage_min_for_candidate_generation,
+            'coverage_threshold_promotion': self.coverage_min_for_promotion,
+            'coverage_for_candidates': coverage_for_candidates,
+            'coverage_for_promotion': coverage_for_promotion,
             'leaders_count': len(leaders),
             'laggards_count': len(laggards),
+            'qualifying_candidates_count': len(candidates),
+            'qualifying_promotion_count': len(promotable),
             'avg_score': round(float(filtered_scores['composite_raw'].mean()), 4),
             'breadth_pct': round(float(len(leaders) / len(filtered_scores)), 4) if not filtered_scores.empty else 0.0,
             'engine_status': 'READY',
-            'validity_status': 'VALID' if coverage_pct >= 0.5 else 'DEGRADED',
+            'validity_status': 'VALID' if coverage_pct >= self.coverage_min_for_promotion else ('DEGRADED' if coverage_pct >= self.coverage_min_for_candidate_generation else 'INVALID'),
             'directional_vote': directional_vote,
+            'paper_generation_state': paper_generation_state,
             'thresholds': {
-                'min_coverage_pct': 0.5,
+                'min_coverage_pct_candidate': self.coverage_min_for_candidate_generation,
+                'min_coverage_pct_promotion': self.coverage_min_for_promotion,
+                'candidate_score_min': self.candidate_score_min,
+                'promotion_score_min': self.promotion_score_min,
                 'min_leaders_for_vote': 1
             },
+            'top_candidates': candidates.sort_values('composite_raw', ascending=False).head(5).to_dict(orient='index'),
+            'top_promotable_candidates': promotable.sort_values('composite_raw', ascending=False).head(5).to_dict(orient='index'),
             'details': {
                 'leaders': leaders.sort_values('composite_z', ascending=False).head(10).to_dict(orient='index'),
-                'laggards': laggards.sort_values('composite_z', ascending=True).head(10).to_dict(orient='index')
+                'laggards': laggards.sort_values('composite_z', ascending=True).head(10).to_dict(orient='index'),
+                'candidates': candidates.sort_values('composite_raw', ascending=False).head(10).to_dict(orient='index'),
+                'promotable': promotable.sort_values('composite_raw', ascending=False).head(10).to_dict(orient='index')
             }
         }
         

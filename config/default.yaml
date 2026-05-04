@@ -46,11 +46,26 @@ flows:
   rs_spread_lookback: 20
 
 # --- Leadership Engine ---
-# Section 4 & 10.3
+# Section 4 & 10.3, Paper Trade Generation Tuning (v0.7.1)
 leadership:
   w_rs_slope: 0.55
   w_volume_ratio: 0.25
   w_breakout: 0.20
+  
+  # Candidate Generation Thresholds (lower, discovery-mode)
+  coverage_min_for_candidate_generation: 0.45
+  candidate_score_min: 0.05
+  volume_ratio_min_candidate: 1.00
+  turnover_min_candidate_cr: 2
+  
+  # Paper Promotion Thresholds (higher, execution-mode)
+  coverage_min_for_promotion: 0.60
+  promotion_score_min: 0.18
+  strong_promotion_score_min: 0.30
+  volume_ratio_min_promotion: 1.15
+  turnover_min_promotion_cr: 5
+  
+  # Engine tuning
   min_volume_ratio: 1.2
   min_turnover_inr: 50000000
   earnings_blackout_days: 5
@@ -87,6 +102,22 @@ advisor:
   max_recommendations: 5
   mode: PAPER
 
+# --- Candidate Scoring (Paper Trade Generation Tuning v0.7.1) ---
+candidate_scoring:
+  # Candidate score formula weights
+  w_leadership_symbol_score: 0.40
+  w_regime_alignment_score: 0.25
+  w_volume_confirmation_score: 0.15
+  w_flow_modifier_score: 0.10
+  w_execution_context_score: 0.10
+  
+  # Promotion score formula weights (stricter than candidate)
+  w_candidate_score: 0.35
+  w_liquidity_quality_score: 0.20
+  w_risk_sizing_fit: 0.15
+  w_leadership_confidence: 0.15
+  w_flow_confirmation: 0.15
+
 # --- Backtest Defaults ---
 # Section 9
 backtest:
@@ -96,7 +127,7 @@ backtest:
   slippage_bps: 10
   commission_per_lot: 200
 
-# --- Paper Execution (v0.6.1) ---
+# --- Paper Execution (v0.7.1 - Paper Trade Generation Tuning) ---
 paper_execution:
   tradable_regimes: ["BULLISH", "BEARISH", "VOLATILE_TREND", "RANGE"]
   min_confidence: 38.0
@@ -104,6 +135,20 @@ paper_execution:
   reference_capital: 1000000.0
   assumed_entry_price: 22500.0 # NIFTY proxy
   stop_loss_pct: 1.5
+  
+  # Paper mode states (Section 8)
+  states:
+    no_candidates: "NO_CANDIDATES"
+    candidates_found: "CANDIDATES_FOUND"
+    promotion_blocked: "PROMOTION_BLOCKED"
+    paper_trades_created: "PAPER_TRADES_CREATED"
+  
+  # Empty state messages (Section 9)
+  messages:
+    no_candidates: "No paper trades — no leadership candidates generated"
+    candidates_found_not_promoted: "No paper trades — candidates found, but promotion threshold not met"
+    promotion_blocked_risk: "No paper trades — risk gate blocked promotion"
+    promotion_blocked_flow: "No paper trades — contradictory flow blocked directional setup"
 
 # --- Ingestion & Fallback Architecture (v0.7.0) ---
 # Controls data source ladder behaviour, freshness thresholds, and sandbox mode.
