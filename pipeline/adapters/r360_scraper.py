@@ -41,19 +41,36 @@ async def get_r360_data_dom(symbol: str = "NIFTY") -> Optional[Dict[str, Any]]:
             # Extra buffer for JS rendering
             await asyncio.sleep(8)
             
-            # 1. Extract PCR, Max Pain, Spot Price using actual class selectors
+            # 1. Extract PCR, Max Pain, Spot Price using robust text-based traversal
             metrics = await page.evaluate('''() => {
-                const pcr_el = document.querySelector(".fno_pcr");
-                const maxpain_el = document.querySelector(".f_fut_maxpain");
-                const spot_el = document.querySelector(".f_fut_spotprice");
+                const results = { pcr: null, maxPain: null, spotPrice: null };
                 
-                const parse = (el) => {
-                    if (!el) return null;
-                    const v = parseFloat((el.innerText || el.textContent || "").replace(/,/g, "").trim());
+                const parseVal = (str) => {
+                    const v = parseFloat(str.replace(/,/g, "").trim());
                     return isNaN(v) ? null : v;
                 };
+
+                // Find all elements and look for our labels
+                const allElements = document.querySelectorAll("div, p, span, b");
+                allElements.forEach(el => {
+                    const text = el.innerText || "";
+                    
+                    if (text === "Put Call Ratio") {
+                        // Value is usually in the previous sibling or a child of the parent
+                        const valEl = el.parentElement.querySelector(".card-title") || el.previousElementSibling;
+                        if (valEl) results.pcr = parseVal(valEl.innerText);
+                    }
+                    if (text === "Max Pain") {
+                        const valEl = el.parentElement.querySelector(".card-title") || el.previousElementSibling;
+                        if (valEl) results.maxPain = parseVal(valEl.innerText);
+                    }
+                    if (text === "Spot Price") {
+                        const valEl = el.parentElement.querySelector(".card-title") || el.previousElementSibling;
+                        if (valEl) results.spotPrice = parseVal(valEl.innerText);
+                    }
+                });
                 
-                return { pcr: parse(pcr_el), maxPain: parse(maxpain_el), spotPrice: parse(spot_el) };
+                return results;
             }''')
             
             pcr_val = metrics.get('pcr')

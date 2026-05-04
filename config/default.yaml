@@ -16,8 +16,8 @@ regime:
   ts_slope50_scale: 0.002
 
   # Classification thresholds
-  min_adx_trend: 25
-  max_adx_range: 25
+  min_adx_trend: 18
+  max_adx_range: 18
   min_trend_score: 3
   max_ts_range: 3
   min_bullish_breadth: 55
@@ -78,13 +78,14 @@ risk:
 # --- Decision Aggregator ---
 # Section 6 & 10.5
 advisor:
-  w_regime: 0.45
-  w_flows: 0.30
+  w_regime: 0.35
+  w_flows: 0.40
   w_leadership: 0.25
-  min_leaders_for_vote: 3
+  min_leaders_for_vote: 1
   confidence_full: 0.65
-  confidence_small: 0.50
+  confidence_small: 0.40
   max_recommendations: 5
+  mode: PAPER
 
 # --- Backtest Defaults ---
 # Section 9
@@ -97,8 +98,8 @@ backtest:
 
 # --- Paper Execution (v0.6.1) ---
 paper_execution:
-  tradable_regimes: ["BULLISH", "BEARISH", "VOLATILE_TREND"]
-  min_confidence: 60.0
+  tradable_regimes: ["BULLISH", "BEARISH", "VOLATILE_TREND", "RANGE"]
+  min_confidence: 38.0
   require_risk_halt_false: True
   reference_capital: 1000000.0
   assumed_entry_price: 22500.0 # NIFTY proxy

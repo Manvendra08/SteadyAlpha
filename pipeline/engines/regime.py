@@ -57,13 +57,51 @@ class RegimeEngine:
         z_score = (current_slope - mean) / std
         return round(float(z_score), 4)
 
-    def run(self, close: pd.Series, vix: float, breadth_pct: float, 
+    def calculate_adx(self, high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> float:
+        """
+        Calculate Average Directional Index (ADX) using pure Pandas/Numpy.
+        """
+        if close is None or high is None or low is None or len(close) < window * 2:
+            return 0.0
+            
+        prev_close = close.shift(1)
+        
+        tr = pd.concat([high - low, abs(high - prev_close), abs(low - prev_close)], axis=1).max(axis=1)
+        atr = tr.rolling(window).mean()
+        
+        # Directional Movement
+        plus_dm = high.diff().clip(lower=0)
+        minus_dm = (-low.diff()).clip(lower=0)
+        
+        # Simple DI calculation
+        plus_di = 100 * (plus_dm.rolling(window).mean() / atr)
+        minus_di = 100 * (minus_dm.rolling(window).mean() / atr)
+        
+        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        adx = dx.rolling(window).mean().iloc[-1]
+        
+        return round(float(adx), 2) if not np.isnan(adx) else 0.0
+
+    def calculate_trend_score(self, z_score: float, adx: float) -> float:
+        """
+        Synthesizes Z-score and ADX into a normalized -1 to 1 trend score.
+        """
+        # Tangent mapping for Z-score (-1 to 1)
+        z_comp = np.tanh(z_score)
+        # ADX strength (0 to 1)
+        adx_comp = min(adx / 50.0, 1.0)
+        
+        return round(float(z_comp * adx_comp), 4)
+
+    def run(self, high: pd.Series, low: pd.Series, close: pd.Series, vix: float, breadth_pct: float, 
             previous_state: Optional[str] = None, days_in_state: int = 0) -> Dict[str, Any]:
         """
         Execute regime detection with Z-score thresholds and hysteresis.
         """
         # 1. Calculate Core Signal (RS Slope Z-score)
         trend_z = self.calculate_rs_slope_zscore(close)
+        adx = self.calculate_adx(high, low, close)
+        trend_score = self.calculate_trend_score(trend_z, adx)
         
         # 2. Base Classification
         if trend_z >= self.z_thresholds['bull']:
@@ -101,14 +139,20 @@ class RegimeEngine:
                     is_transitioning = True
         
         # 6. Output
-        # Normalize trend_score (Z-score) to roughly [-1, 1] for Advisor
-        normalized_trend = float(np.tanh(trend_z))
-        
+        directional_vote = "NEUTRAL"
+        if "BULLISH" in confirmed_regime: directional_vote = "LONG"
+        elif "BEARISH" in confirmed_regime: directional_vote = "SHORT"
+        elif "VOLATILE" in confirmed_regime: directional_vote = "WEAK"
+        elif confirmed_regime == "SHOCK": directional_vote = "SHORT"
+
         return {
             'state': confirmed_regime,
-            'trend_score': round(normalized_trend, 4),
+            'validity_status': 'VALID' if (len(close) >= 126 and vix > 0) else 'DEGRADED',
+            'directional_vote': directional_vote,
+            'trend_score': trend_score,
             'trend_z': trend_z,
-            'vix_value': round(float(vix), 2),
+            'adx': adx,
+            'vix_value': round(float(vix), 2) if vix is not None else 0.0,
             'breadth_pct': round(float(breadth_pct), 4) if breadth_pct else 0.0,
             'is_shock': is_shock,
             'is_transitioning': is_transitioning,

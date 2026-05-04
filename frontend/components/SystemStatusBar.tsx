@@ -3,6 +3,7 @@
 import React from 'react';
 import { DashboardViewModel } from '../types/DashboardViewModel';
 import { usePipelineHeartbeat } from '../hooks/usePipelineHeartbeat';
+import { useTheme } from './Providers';
 
 type Props = {
   pipelineStatus: DashboardViewModel['pipelineStatus'];
@@ -75,15 +76,21 @@ function RadialGauge({ score, label, colorClass }: { score: number; label: strin
 }
 
 export default function SystemStatusBar({ pipelineStatus: initialStatus, tradingValidity, mode, riskMode, lastSuccessTs, dataTrustScore, tradingReadinessScore, invalidReasons }: Props) {
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const { isRunning } = usePipelineHeartbeat();
+  const { theme, toggleTheme } = useTheme();
   
   const currentPipelineStatus = isRunning ? 'RUNNING' : initialStatus;
   const isInvalid = tradingValidity === 'NO';
 
-  const formattedDate = new Date(lastSuccessTs).toLocaleString('en-IN', {
+  const formattedDate = mounted ? new Date(lastSuccessTs).toLocaleString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: 'numeric', minute: '2-digit', hour12: true,
-  });
+  }) : '—';
 
   return (
     <div className="sticky top-0 z-50 flex flex-col w-full">
@@ -135,11 +142,28 @@ export default function SystemStatusBar({ pipelineStatus: initialStatus, trading
               <div className="text-[9px] uppercase tracking-[0.15em] font-black text-text-muted opacity-50">
                 {isRunning ? 'Syncing Pipeline...' : 'Cluster Synchronized'}
               </div>
-              <div className="text-[10px] font-mono text-text-secondary">
+              <div className="text-[10px] font-mono text-text-secondary" suppressHydrationWarning>
                 {formattedDate}
               </div>
             </div>
             
+            {/* Theme Toggle */}
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-xl bg-bg-elevated hover:bg-border-theme transition-colors border border-border-theme/50"
+              aria-label="Toggle Theme"
+            >
+              {theme === 'dark' ? (
+                <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707M16.95 16.95l.707.707M7.05 7.05l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20.354 15.354A9 9 0 118.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+              )}
+            </button>
+
             {/* Sync heartbeat indicator */}
             <div className="flex items-center gap-1">
                <div className="flex gap-[2px]">

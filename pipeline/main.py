@@ -122,6 +122,8 @@ class SteadyAlphaPipeline:
                 days_in_state = prev_state_dict.get("days_in_state", 0)
 
                 regime_state = self.regime_engine.run(
+                    high           = bundle.high,
+                    low            = bundle.low,
                     close          = bundle.close,
                     vix            = bundle.vix if bundle.vix is not None else None,
                     breadth_pct    = bundle.breadth_pct if bundle.breadth_pct is not None else None,
@@ -146,6 +148,7 @@ class SteadyAlphaPipeline:
                     sector_prices= bundle.sectors,
                     max_pain     = bundle.max_pain,
                     spot_price   = bundle.spot_price,
+                    pcr_latest   = bundle.pcr,
                 )
                 flows_state["engine_status"] = gates.flows
 
@@ -197,12 +200,17 @@ class SteadyAlphaPipeline:
 
             # ── 7. Advisor ────────────────────────────────────────────────
             logger.info(f"Decision gate: {gates.decision}")
+            
+            # Determine Mode (PAPER, ASSISTED_LIVE, LIVE_AUTO)
+            # Default to PAPER for now as per Relaxation Spec
+            mode = self.config.get('advisor', {}).get('mode', 'PAPER')
+            
             advisor_state = self.advisor.run(
                 regime_state    = regime_state,
                 flows_state     = flows_state,
                 leadership_state= leadership_state,
                 risk_state      = risk_state,
-                options_state   = options_state,
+                mode            = mode,
             )
 
             # Override label if run is not trading-valid

@@ -36,11 +36,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function DiagnosticsDrawer({ diagnostics }: Props) {
   const [open, setOpen] = useState(false);
-  const { runId, durationMs, pipelineVersion, triggerType, sourceRegistry, validationChecks, engineWarnings, rawDataPreviews } = diagnostics;
+  const { runId, durationMs, pipelineVersion, triggerType, sourceRegistry, validationChecks, consistencyChecks, engineWarnings, rawDataPreviews } = diagnostics;
 
-  const passCount = validationChecks.filter(c => c.result === 'PASS').length;
-  const failCount = validationChecks.filter(c => c.result === 'FAIL').length;
-  const warnCount = validationChecks.filter(c => c.result === 'WARN').length;
+  const passCount = (validationChecks?.length || 0) + (consistencyChecks?.length || 0);
+  const failCount = (validationChecks?.filter(c => c.result === 'FAIL').length || 0) + (consistencyChecks?.filter(c => c.result === 'FAIL').length || 0);
+  const warnCount = (validationChecks?.filter(c => c.result === 'WARN').length || 0) + (consistencyChecks?.filter(c => c.result === 'WARN').length || 0);
 
   return (
     <div className="mt-6 border-t border-border-theme pt-6">
@@ -149,7 +149,7 @@ export default function DiagnosticsDrawer({ diagnostics }: Props) {
           </Section>
 
           {/* 3. Validation checks */}
-          <Section title={`✅ Validation Checks — ${passCount}P ${warnCount}W ${failCount}F`}>
+          <Section title={`✅ Validation Checks — ${validationChecks.filter(c => c.result === 'PASS').length}P ${validationChecks.filter(c => c.result === 'WARN').length}W ${validationChecks.filter(c => c.result === 'FAIL').length}F`}>
             <div className="space-y-1.5">
               {validationChecks.map((c, i) => (
                 <div key={i} className="flex items-center justify-between text-xs">
@@ -162,6 +162,23 @@ export default function DiagnosticsDrawer({ diagnostics }: Props) {
               ))}
             </div>
           </Section>
+
+          {/* 3.5 Consistency checks */}
+          {consistencyChecks && consistencyChecks.length > 0 && (
+            <Section title={`⚖️ Consistency Checks — ${consistencyChecks.filter(c => c.result === 'PASS').length}P ${consistencyChecks.filter(c => c.result === 'WARN').length}W ${consistencyChecks.filter(c => c.result === 'FAIL').length}F`}>
+              <div className="space-y-1.5">
+                {consistencyChecks.map((c, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <span className="text-text-secondary">{c.label}</span>
+                    <div className="flex items-center gap-2 ml-3">
+                      {c.note && <span className="text-[10px] text-text-muted font-mono">{c.note}</span>}
+                      <Badge v={c.result} small />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
 
           {/* 4. Engine warnings */}
           <Section title={`⚠️ Engine Warnings (${engineWarnings.length})`}>

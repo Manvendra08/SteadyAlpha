@@ -22,12 +22,11 @@ const EMPTY_REASONS: Record<string, string> = {
   DATA_MISSING: 'No universe data available',
   COVERAGE_TOO_LOW: 'Coverage below threshold',
   WAITING_FOR_BATCH: 'Waiting for OHLCV batch',
-  SUPPRESSED: 'Leaders suppressed — no-trade state',
 };
 
 export default function LeadershipCard({
   status, universeCoverage, qualifiedLeaderCount, qualifiedLaggardCount,
-  leaders, laggards, statusReason, engineStatus, dependency, impact, warning,
+  leaders, laggards, statusReason, engineStatus, validityStatus, directionalVote, dependency, impact, warning, thresholds,
 }: DashboardViewModel['leadership']) {
   const isFailed = engineStatus === 'FAILED';
   const hasLeaders = qualifiedLeaderCount > 0 && leaders.length > 0;
@@ -46,10 +45,14 @@ export default function LeadershipCard({
           </div>
           <h2 className="text-text-primary text-[11px] font-black uppercase tracking-[0.1em]">Leadership</h2>
         </div>
-        <EngineStatusBadge status={engineStatus} />
+        <div className="flex items-center gap-2">
+           <EngineStatusBadge status={engineStatus} />
+           <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+             validityStatus === 'VALID' ? 'border-green-400/30 text-green-400' : 'border-amber-400/30 text-amber-400'
+           }`}>{validityStatus}</span>
+        </div>
       </div>
 
-      {/* Hero Counts - Visual Priority */}
       <div className="flex gap-4">
         <div className="flex-1 flex flex-col">
           <span className="text-[9px] font-black uppercase tracking-widest text-text-muted mb-1">Leaders</span>
@@ -64,17 +67,39 @@ export default function LeadershipCard({
           </div>
         </div>
       </div>
+      <div className="text-[10px] font-black uppercase tracking-widest text-text-muted opacity-60">
+        Signal Vote: <span className="text-text-primary">{directionalVote}</span>
+      </div>
 
       {/* Coverage Bar */}
       <div className="flex flex-col gap-1.5">
         <div className="flex justify-between text-[10px] font-bold uppercase tracking-tight text-text-muted">
-          <span>Universe Coverage</span>
+          <div className="flex flex-col">
+            <span>Universe Coverage</span>
+            {thresholds && (
+              <span className="text-[8px] opacity-60 normal-case font-medium">Threshold: {(thresholds.minCoveragePct * 100).toFixed(0)}%</span>
+            )}
+          </div>
           <span className="font-mono text-text-primary">{universeCoverage !== null ? `${(universeCoverage * 100).toFixed(0)}%` : '—'}</span>
         </div>
         <div className="h-1 w-full bg-bg-elevated rounded-full overflow-hidden">
-           <div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: `${(universeCoverage ?? 0) * 100}%` }}></div>
+           <div className={`h-full transition-all duration-1000 ${
+             thresholds && universeCoverage !== null && universeCoverage >= thresholds.minCoveragePct ? 'bg-blue-500' : 'bg-amber-500'
+           }`} style={{ width: `${(universeCoverage ?? 0) * 100}%` }}></div>
         </div>
       </div>
+
+      {/* Threshold Transparency (Spec 4.0) */}
+      {thresholds && (
+        <div className="bg-bg-elevated/40 rounded-lg p-2 border border-border-theme/30 flex flex-col gap-1">
+           <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-text-muted">
+              <span>Qualifying leaders</span>
+              <span className={qualifiedLeaderCount >= thresholds.minLeadersForVote ? 'text-green-400' : 'text-text-primary'}>
+                {qualifiedLeaderCount} / min {thresholds.minLeadersForVote}
+              </span>
+           </div>
+        </div>
+      )}
 
       {/* Preview Rows */}
       {(hasLeaders || hasLaggards) && !isFailed ? (

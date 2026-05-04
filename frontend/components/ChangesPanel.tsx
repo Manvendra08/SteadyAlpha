@@ -2,12 +2,17 @@ import React from 'react';
 import { DashboardViewModel } from '../types/DashboardViewModel';
 
 export default function ChangesPanel({ material, items, asOfTs }: DashboardViewModel['changes']) {
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
   return (
     <div className="bg-bg-card border border-border-theme rounded-xl p-4">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-text-muted text-[10px] font-bold uppercase tracking-widest">State Changes</h2>
-        <span className="text-[10px] text-text-muted opacity-60">
-          Since {new Date(asOfTs).toLocaleTimeString()}
+        <span className="text-[10px] text-text-muted opacity-60" suppressHydrationWarning>
+          Since {mounted ? new Date(asOfTs).toLocaleTimeString() : '—'}
         </span>
       </div>
 

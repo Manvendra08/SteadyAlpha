@@ -20,6 +20,8 @@ export type DashboardViewModel = {
     breadthPct: number;
     hysteresisState: 'CONFIRMED' | 'WAITING';
     engineStatus: EngineStatus;
+    validityStatus: 'VALID' | 'DEGRADED' | 'INVALID';
+    directionalVote: 'LONG' | 'SHORT' | 'NEUTRAL' | 'WEAK' | 'BLOCKED';
     dependency: string;
     impact: string;
     warning?: string | null;
@@ -28,7 +30,9 @@ export type DashboardViewModel = {
   flows: {
     bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
     fii5dNet: number | null;
+    fiiNetDaily?: number | null;
     dii5dNet: number | null;
+    diiNetDaily?: number | null;
     pcrOi: number | null;
     maxPain: number | null;
     spotVsMaxPainPct: number | null;
@@ -36,6 +40,8 @@ export type DashboardViewModel = {
     freshness: 'FRESH' | 'STALE' | 'FALLBACK' | 'MISSING';
     biasDrivers: string[];
     engineStatus: EngineStatus;
+    validityStatus: 'VALID' | 'DEGRADED' | 'INVALID';
+    directionalVote: 'LONG' | 'SHORT' | 'NEUTRAL' | 'WEAK' | 'BLOCKED';
     dependency: string;
     impact: string;
     warning?: string | null;
@@ -50,9 +56,15 @@ export type DashboardViewModel = {
     laggards: { symbol: string; score: number; sector?: string }[];
     statusReason: string;
     engineStatus: EngineStatus;
+    validityStatus: 'VALID' | 'DEGRADED' | 'INVALID';
+    directionalVote: 'LONG' | 'SHORT' | 'NEUTRAL' | 'WEAK' | 'BLOCKED';
     dependency: string;
     impact: string;
     warning?: string | null;
+    thresholds?: {
+      minCoveragePct: number;
+      minLeadersForVote: number;
+    };
   };
 
   risk: {
@@ -64,20 +76,48 @@ export type DashboardViewModel = {
     triggerReason?: string | null;
     consecutiveLossDays?: number | null;
     engineStatus: EngineStatus;
+    validityStatus: 'VALID' | 'DEGRADED' | 'INVALID';
+    directionalVote: 'PASS_EXECUTION' | 'CAUTION' | 'BLOCKED';
     dependency: string;
     impact: string;
     warning?: string | null;
   };
 
   decision: {
-    label: 'NO_TRADE' | 'WATCHLIST' | 'LONG_BIAS' | 'SHORT_BIAS' | 'PAPER_ELIGIBLE' | 'INVALID_FOR_TRADING';
+    label: 'NO_TRADE' | 'WATCHLIST' | 'LONG_BIAS' | 'SHORT_BIAS' | 'PAPER_ELIGIBLE' | 'INVALID_FOR_TRADING' | 'WATCHLIST_LONG' | 'WATCHLIST_SHORT' | 'LONG_BIAS_LOW_CONF' | 'SHORT_BIAS_LOW_CONF';
+    topLineSummary?: string;
     confidencePct: number;
-    regimeGate: 'PASS' | 'FAIL';
-    flowGate: 'PASS' | 'FAIL';
-    leadershipGate: 'PASS' | 'FAIL';
-    riskGate: 'PASS' | 'FAIL';
+    directionalConfidence: number;
+    actionConfidence: number;
+    validityStatus: {
+      regime: string;
+      flows: string;
+      leadership: string;
+      risk: string;
+    };
+    directionalVotes: {
+      regime: string;
+      flows: string;
+      leadership: string;
+      risk: string;
+    };
     reasons: string[];
     conflicts: string[];
+    drivers: string[];
+    boosters: string[];
+    drags: string[];
+    gates: string[];
+    confidenceCalibration?: {
+      contributions: {
+        regime: number;
+        flows: number;
+        leadership: number;
+        bonus: number;
+        penalty: number;
+      };
+      watchlistFloorMet: boolean;
+      promotionThresholdMet: boolean;
+    };
   };
 
   changes: {
@@ -124,6 +164,11 @@ export type DashboardViewModel = {
       criticality: string;
     }[];
     validationChecks: {
+      label: string;
+      result: 'PASS' | 'FAIL' | 'WARN';
+      note?: string | null;
+    }[];
+    consistencyChecks: {
       label: string;
       result: 'PASS' | 'FAIL' | 'WARN';
       note?: string | null;

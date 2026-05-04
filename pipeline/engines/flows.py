@@ -125,14 +125,23 @@ class FlowsEngine:
         return round(float(spread), 4)
 
     def run(self, fii_flows: pd.Series, dii_flows: pd.Series, pcr_data: pd.Series, 
-            sector_prices: pd.DataFrame, max_pain: Optional[float] = None, spot_price: Optional[float] = None) -> Dict[str, Any]:
+            sector_prices: pd.DataFrame, max_pain: Optional[float] = None, 
+            spot_price: Optional[float] = None, pcr_latest: Optional[float] = None) -> Dict[str, Any]:
         """
         Main execution method.
         """
         # 1. Calculate Components
         fii_z = self.calculate_fii_zscore(fii_flows)
         dii_z = self.calculate_fii_zscore(dii_flows) # Reusing Z-score logic for DII
+        
+        # PCR Logic: Priority to Series Percentile, Fallback to Scalar Normalization
         pcr_pct = self.calculate_pcr_percentile(pcr_data)
+        if (pcr_data is None or len(pcr_data) < self.pcr_lookback) and pcr_latest is not None:
+            # Map 0.3 -> 1.0 (Bullish), 1.0 -> 0.0 (Neutral), 1.7+ -> -1.0 (Bearish)
+            pcr_norm = np.clip((1.0 - pcr_latest) / 0.7, -1, 1)
+        else:
+            pcr_norm = 1.0 - (2.0 * pcr_pct)
+            
         rs_spread = self.calculate_rs_spread(sector_prices)
         
         # 2. Normalize Components to [-1, 1] or [0, 1] scale
@@ -141,10 +150,6 @@ class FlowsEngine:
         
         # DII Z-score: Same normalization
         dii_norm = np.clip(dii_z, -3, 3) / 3.0
-        
-        # PCR Percentile: High PCR usually means bearish (overbought calls), Low PCR bullish.
-        # Inverse relationship. 0.0 (Low PCR) -> Bullish (+1), 1.0 (High PCR) -> Bearish (-1)
-        pcr_norm = 1.0 - (2.0 * pcr_pct)
         
         # RS Spread: Positive spread means leadership (Bullish). Negative means lagging (Bearish).
         # Normalize spread. Typical spread might be 0.2 to 0.5.
@@ -172,16 +177,26 @@ class FlowsEngine:
             flows_score = max(flows_score, 0.1) # Boost to at least neutral-positive
         
         # 4. Construct Output
+        directional_vote = "NEUTRAL"
+        if flows_score > 0.18: directional_vote = "LONG"
+        elif flows_score < -0.18: directional_vote = "SHORT"
+        elif abs(flows_score) > 0.08: directional_vote = "WEAK"
+
         flows_state = {
             'flows_score': round(float(flows_score), 4),
+            'validity_status': 'VALID' if (not fii_flows.empty and not pcr_data.empty) else 'DEGRADED',
+            'directional_vote': directional_vote,
             'fii_5d_z': fii_z,
+            'fii_net_daily': float(fii_flows.iloc[-1]) if not fii_flows.empty else 0.0,
             'dii_5d_z': dii_z,
+            'dii_net_daily': float(dii_flows.iloc[-1]) if not dii_flows.empty else 0.0,
             'is_absorption': is_absorption,
             'pcr_smooth': round(float(pcr_pct), 4),
+            'pcr_latest': pcr_latest,
             'rs_spread_pct': rs_spread,
             'max_pain': max_pain,
             'spot_price': spot_price,
-            'spot_vs_max_pain_pct': round(((spot_price - max_pain) / max_pain * 100), 2) if (spot_price and max_pain) else None,
+            'spot_vs_max_pain_pct': round(((spot_price - max_pain) / max_pain * 100), 2) if (spot_price and max_pain and max_pain != 0) else 0.0,
             'components': {
                 'fii_norm': round(float(fii_norm), 4),
                 'dii_norm': round(float(dii_norm), 4),

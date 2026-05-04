@@ -20,7 +20,8 @@ function EngineStatusBadge({ status }: { status: EngineStatus }) {
 
 export default function FlowsCard({
   bias, fii5dNet, dii5dNet, pcrOi, maxPain, spotVsMaxPainPct, sectorAlignment,
-  freshness, biasDrivers, engineStatus, dependency, impact, warning,
+  freshness, biasDrivers, engineStatus, validityStatus, directionalVote, dependency, impact, warning,
+  fiiNetDaily, diiNetDaily,
 }: DashboardViewModel['flows']) {
   const isFailed = engineStatus === 'FAILED' || !bias;
 
@@ -41,13 +42,21 @@ export default function FlowsCard({
           </div>
           <h2 className="text-text-primary text-[11px] font-black uppercase tracking-[0.1em]">Flows</h2>
         </div>
-        <EngineStatusBadge status={engineStatus} />
+        <div className="flex items-center gap-2">
+           <EngineStatusBadge status={engineStatus} />
+           <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+             validityStatus === 'VALID' ? 'border-green-400/30 text-green-400' : 'border-amber-400/30 text-amber-400'
+           }`}>{validityStatus}</span>
+        </div>
       </div>
 
       {/* Bias hero - Visual Priority */}
       <div className="flex flex-col">
         <div className={`text-2xl font-black tracking-tighter leading-tight ${biasColor}`}>
           {isFailed ? 'NO DATA' : bias}
+        </div>
+        <div className="text-[10px] font-black uppercase tracking-widest text-text-muted opacity-60 mt-0.5">
+          Signal Vote: <span className={biasColor}>{directionalVote}</span>
         </div>
         <div className="flex items-center gap-2 mt-1">
           <span className={`text-[9px] font-black tracking-widest px-1.5 py-0.5 rounded ${
@@ -58,23 +67,33 @@ export default function FlowsCard({
         </div>
       </div>
 
-      {/* Metrics - Smaller Mono-spaced */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] text-text-secondary">
-        <div className="flex justify-between border-b border-border-theme/30 pb-1">
-          <span className="text-text-muted font-medium">FII 5D</span>
-          <span className="font-mono text-text-primary">{fii5dNet !== null && !isFailed ? fii5dNet.toFixed(2) : '—'}</span>
+      {/* Metrics - High Density Grid */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-[11px] text-text-secondary">
+        <div className="flex flex-col border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium text-[9px] uppercase tracking-wider">FII Net (Daily)</span>
+          <span className="font-mono text-text-primary text-sm">{fiiNetDaily !== null && !isFailed ? `${fiiNetDaily > 0 ? '+' : ''}${fiiNetDaily.toLocaleString()}` : '—'}</span>
         </div>
-        <div className="flex justify-between border-b border-border-theme/30 pb-1">
-          <span className="text-text-muted font-medium">PCR OI</span>
-          <span className="font-mono text-text-primary">{pcrOi !== null && !isFailed ? pcrOi.toFixed(2) : '—'}</span>
+        <div className="flex flex-col border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium text-[9px] uppercase tracking-wider">FII Z-Score</span>
+          <span className="font-mono text-text-primary text-sm">{fii5dNet !== null && !isFailed ? fii5dNet.toFixed(2) : '—'}</span>
         </div>
-        <div className="flex justify-between border-b border-border-theme/30 pb-1">
-          <span className="text-text-muted font-medium">Max Pain Δ</span>
-          <span className="font-mono text-text-primary">{spotVsMaxPainPct !== null && !isFailed ? `${spotVsMaxPainPct.toFixed(1)}%` : '—'}</span>
+        <div className="flex flex-col border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium text-[9px] uppercase tracking-wider">PCR OI</span>
+          <span className="font-mono text-text-primary text-sm">{pcrOi !== null && !isFailed ? pcrOi.toFixed(2) : '—'}</span>
         </div>
-        <div className="flex justify-between border-b border-border-theme/30 pb-1">
-          <span className="text-text-muted font-medium">Alignment</span>
-          <span className={`font-mono ${
+        <div className="flex flex-col border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium text-[9px] uppercase tracking-wider">Max Pain Level</span>
+          <span className="font-mono text-text-primary text-sm">{maxPain !== null && !isFailed ? maxPain.toLocaleString() : '—'}</span>
+        </div>
+        <div className="flex flex-col border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium text-[9px] uppercase tracking-wider">Spot vs Pain Δ</span>
+          <span className={`font-mono text-sm ${spotVsMaxPainPct !== null && spotVsMaxPainPct > 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {spotVsMaxPainPct !== null && !isFailed ? `${spotVsMaxPainPct > 0 ? '+' : ''}${spotVsMaxPainPct.toFixed(2)}%` : '—'}
+          </span>
+        </div>
+        <div className="flex flex-col border-b border-border-theme/30 pb-1">
+          <span className="text-text-muted font-medium text-[9px] uppercase tracking-wider">Sector Alignment</span>
+          <span className={`font-mono text-sm ${
             sectorAlignment === 'ALIGNED' ? 'text-green-400' :
             sectorAlignment === 'CONFLICTED' ? 'text-red-400' : 'text-text-muted'
           }`}>{isFailed ? '—' : sectorAlignment}</span>

@@ -1,175 +1,206 @@
 """
 SteadyAlpha Advisor
 Spec Section 5: Signal Integration & Recommendation
+Final Tuning Spec v1.2 Implemented
 
 Responsibilities:
 1. Aggregate signals from Regime, Flows, and Leadership engines.
-2. Apply weighted voting logic.
-3. Detect conflicts between engines.
-4. Adjust confidence based on conflicts and data quality.
-5. Output final recommendation to signals_summary.
+2. Separate engine validity from directional contribution.
+3. Split confidence math from final action mapping.
+4. Generate semantically precise decision summaries.
 """
 
 import yaml
 import numpy as np
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 class Advisor:
     def __init__(self, config_path: str = "config/default.yaml"):
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
             self.config = config.get('advisor', {})
+            self.paper_config = config.get('paper_execution', {})
         
-        self.weights = self.config.get('weights', {'regime': 0.40, 'flows': 0.25, 'leadership': 0.20, 'options': 0.15})
-        self.conf_adj = self.config.get('confidence_adjustments', {
-            'conflict_penalty': 0.2,
-            'low_data_penalty': 0.3
-        })
+        # Spec 1.0: Calibration Weights
+        self.w_regime = self.config.get('w_regime', 0.45)
+        self.w_flows = self.config.get('w_flows', 0.30)
+        self.w_leadership = self.config.get('w_leadership', 0.25)
+        
+        # Spec 5.0: Action Thresholds
+        self.watchlist_floor = 0.05 # Paper Floor
+        self.promotion_floor = self.paper_config.get('min_confidence', 0.18)
+        if self.promotion_floor > 1.0: # If in pct format (e.g. 18.0)
+            self.promotion_floor /= 100.0
 
-    def normalize_regime(self, regime_state: Dict[str, Any]) -> float:
+    def get_engine_votes(self, regime_state: Dict[str, Any], flows_state: Dict[str, Any], 
+                         leadership_state: Dict[str, Any], risk_state: Dict[str, Any]) -> Dict[str, str]:
         """
-        Map regime state to [-1, 1].
+        Spec #1: Map engines to directional votes.
         """
-        state = regime_state.get('state', 'RANGE')
-        trend_score = regime_state.get('trend_score', 0.0)
+        votes = {}
         
-        # Base mapping
-        if 'BULLISH' in state:
-            base = 1.0
-        elif 'BEARISH' in state:
-            base = -1.0
-        else:
-            base = 0.0
-            
-        # Modulate by trend score magnitude
-        # trend_score is roughly [-1, 1]
-        return base * abs(trend_score)
-
-    def normalize_flows(self, flows_state: Dict[str, Any]) -> float:
-        """
-        Map flows score to [-1, 1].
-        flows_score is already normalized in FlowsEngine.
-        """
-        return flows_state.get('flows_score', 0.0)
-
-    def normalize_leadership(self, leadership_state: Dict[str, Any]) -> float:
-        """
-        Map leadership state to [-1, 1].
-        Based on leaders_count and avg_score.
-        """
-        leaders_count = leadership_state.get('leaders_count', 0)
-        universe_size = leadership_state.get('universe_size', 1)
-        avg_score = leadership_state.get('avg_score', 0.0)
+        # Regime Vote
+        reg_state = regime_state.get('state', 'RANGE_BOUND').upper()
+        if reg_state in ['BULLISH', 'TREND_UP']: votes['regime'] = 'LONG'
+        elif reg_state in ['BEARISH', 'TREND_DOWN']: votes['regime'] = 'SHORT'
+        elif reg_state == 'TRANSITION': votes['regime'] = 'WEAK'
+        else: votes['regime'] = 'NEUTRAL'
         
-        # Ratio of leaders
-        leader_ratio = leaders_count / max(universe_size, 1)
+        # Flows Vote (Spec 1.3: Non-blocking neutral)
+        flows_bias = flows_state.get('directional_vote')
+        if not flows_bias:
+            score = flows_state.get('flows_score', 0.0)
+            if score > 0.2: flows_bias = 'LONG'
+            elif score < -0.2: flows_bias = 'SHORT'
+            else: flows_bias = 'NEUTRAL'
+        votes['flows'] = flows_bias
         
-        # If avg_score is positive and many leaders -> Bullish
-        # If avg_score is negative and few leaders -> Bearish
+        # Leadership Vote (Spec 1.1: Decoupled)
+        lead_bias = leadership_state.get('directional_vote')
+        if not lead_bias:
+            lead_count = leadership_state.get('leaders_count', 0)
+            lag_count = leadership_state.get('laggards_count', 0)
+            if lead_count > lag_count and lead_count > 0: lead_bias = 'LONG'
+            elif lag_count > lead_count and lag_count > 0: lead_bias = 'SHORT'
+            else: lead_bias = 'NEUTRAL'
+        votes['leadership'] = lead_bias
         
-        # Simple mapping:
-        # High leader ratio + positive avg_score = 1.0
-        # Low leader ratio + negative avg_score = -1.0
+        # Risk Vote
+        risk_status = risk_state.get('status', 'ACTIVE')
+        if risk_status == 'HALTED': votes['risk'] = 'BLOCKED'
+        elif risk_status == 'REDUCED': votes['risk'] = 'CAUTION'
+        else: votes['risk'] = 'PASS_EXECUTION'
         
-        # Normalize avg_score (Z-score usually around -2 to 2)
-        norm_avg = np.clip(avg_score, -2, 2) / 2.0
-        
-        # Combine
-        # If avg_score is negative, leader_ratio should be low (bearish confirmation)
-        # If avg_score is positive, leader_ratio should be high (bullish confirmation)
-        
-        score = norm_avg * (2 * leader_ratio) # Weight by participation
-        
-        return np.clip(score, -1, 1)
-
-    def detect_conflicts(self, regime_val: float, flows_val: float, leadership_val: float) -> bool:
-        """
-        Detect if engines disagree significantly.
-        """
-        values = [regime_val, flows_val, leadership_val]
-        
-        # Check signs
-        signs = [np.sign(v) for v in values]
-        
-        # Conflict if signs are mixed (e.g., +1, -1, +1)
-        # Ignore 0
-        non_zero_signs = [s for s in signs if s != 0]
-        
-        if not non_zero_signs:
-            return False
-            
-        return len(set(non_zero_signs)) > 1
+        return votes
 
     def run(self, regime_state: Dict[str, Any], flows_state: Dict[str, Any], 
             leadership_state: Dict[str, Any], risk_state: Dict[str, Any],
-            options_state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Main execution method.
-        """
-        # 1. Normalize Inputs
-        regime_val = self.normalize_regime(regime_state)
-        flows_val = self.normalize_flows(flows_state)
-        leadership_val = self.normalize_leadership(leadership_state)
-        options_val = options_state.get('score', 0.0)
+            mode: str = 'PAPER') -> Dict[str, Any]:
         
-        # 2. Weighted Score
-        weighted_score = (
-            self.weights['regime'] * regime_val +
-            self.weights['flows'] * flows_val +
-            self.weights['leadership'] * leadership_val +
-            self.weights['options'] * options_val
-        )
+        # 1. Engine Validity & Votes
+        votes = self.get_engine_votes(regime_state, flows_state, leadership_state, risk_state)
         
-        # 3. Conflict Detection
-        conflict = self.detect_conflicts(regime_val, flows_val, leadership_val)
-        
-        # 4. Confidence Calculation
-        base_confidence = abs(weighted_score)
-        
-        if conflict:
-            base_confidence *= (1.0 - self.conf_adj['conflict_penalty'])
-            
-        # Check Risk State for overrides
-        risk_status = risk_state.get('status', 'ACTIVE')
-        if risk_status == 'HALTED':
-            weighted_score = 0.0
-            base_confidence = 0.0
-            conflict = True # Forced conflict/halt
-            
-        # 5. Determine Action
-        reasoning = []
-        if risk_status == 'HALTED':
-            action = 'HALT'
-            reasoning.append("Risk Circuit Breaker Active")
-        elif weighted_score > 0.3:
-            action = 'LONG'
-            reasoning.append(f"Strong weighted score ({weighted_score:.2f})")
-        elif weighted_score < -0.3:
-            # 5a. Short Approval Record logic (v0.6.1)
-            if regime_val > -0.1:
-                action = 'NEUTRAL'
-                reasoning.append("SHORT rejected: lacks bearish regime confirmation (v0.6.1 gate)")
-            else:
-                action = 'SHORT'
-                reasoning.append(f"Strong bearish score ({weighted_score:.2f})")
-        else:
-            action = 'NEUTRAL'
-            reasoning.append("Score within neutral zone")
-            
-        # 6. Construct Output
-        advisor_state = {
-            'action': action,
-            'reasoning': reasoning,
-            'score': round(float(weighted_score), 4),
-            'confidence': round(float(base_confidence), 4),
-            'conflict_detected': conflict,
-            'components': {
-                'regime': round(float(regime_val), 4),
-                'flows': round(float(flows_val), 4),
-                'leadership': round(float(leadership_val), 4),
-                'options': round(float(options_val), 4)
-            },
-            'risk_override': risk_status == 'HALTED'
+        validity = {
+            'regime': regime_state.get('validity_status', 'VALID'),
+            'flows': flows_state.get('validity_status', 'VALID'),
+            'leadership': leadership_state.get('validity_status', 'VALID'),
+            'risk': risk_state.get('validity_status', 'VALID')
         }
         
-        return advisor_state
+        # 2. Extract normalized scores [0, 1] for confidence
+        regime_score = abs(regime_state.get('trend_score', 0.0))
+        # Regime score is often 0-10, normalize if needed. Assume it's already a confidence-like float or normalize.
+        if regime_score > 1.0: regime_score = min(regime_score / 10.0, 1.0)
+        
+        flows_score = abs(flows_state.get('flows_score', 0.0))
+        if flows_score > 1.0: flows_score = min(flows_score / 3.0, 1.0) # Flows Z-scores can be 3+
+        
+        leadership_score = abs(leadership_state.get('leadership_score', 0.0))
+        if leadership_score == 0.0: # Fallback to avg_score if leadership_score missing
+            leadership_score = abs(leadership_state.get('avg_score', 0.0))
+        
+        # 3. Directional Confidence (weighted score)
+        directional_confidence = (
+            regime_score * self.w_regime +
+            flows_score * self.w_flows +
+            leadership_score * self.w_leadership
+        )
+        
+        # 4. Action Confidence (Execution Quality)
+        # Apply alignment bonus
+        alignment_score = 1.0
+        active_votes = [v for v in [votes['regime'], votes['flows'], votes['leadership']] if v in ('LONG', 'SHORT')]
+        if len(set(active_votes)) == 1 and len(active_votes) >= 2:
+            alignment_score = 1.2
+            
+        action_confidence = directional_confidence * alignment_score
+        
+        # Penalty for degraded engines
+        if any(v == 'DEGRADED' for v in validity.values()):
+            action_confidence *= 0.8
+        if any(v == 'INVALID' for v in validity.values()):
+            action_confidence *= 0.5
+
+        # 5. Final Action Mapping
+        bias = votes['regime'] if votes['regime'] in ('LONG', 'SHORT') else 'NEUTRAL'
+        
+        action = 'NO_TRADE'
+        blocking_reason = None
+        
+        if votes['risk'] == 'BLOCKED':
+            action = 'NO_TRADE'
+            blocking_reason = "Risk Circuit Breaker Active"
+        elif bias == 'NEUTRAL':
+            action = 'NO_TRADE'
+            blocking_reason = "Regime is Neutral/Range-bound"
+        else:
+            if mode == 'PAPER':
+                if action_confidence >= self.promotion_floor:
+                    action = f"PAPER_ELIGIBLE_{bias}"
+                elif action_confidence >= self.watchlist_floor:
+                    action = f"WATCHLIST_{bias}"
+                else:
+                    action = "NO_TRADE"
+                    blocking_reason = "Confidence below watchlist floor"
+            else: # LIVE
+                if action_confidence >= 0.45: # Live threshold usually higher
+                    action = f"LIVE_TRADE_{bias}"
+                else:
+                    action = f"WATCHLIST_{bias}"
+
+        # 6. Reason Buckets
+        drivers = []
+        if votes['regime'] != 'NEUTRAL': drivers.append(f"Regime {votes['regime']} Bias")
+        if votes['flows'] == votes['regime']: drivers.append("Flows Alignment")
+        if votes['leadership'] == votes['regime']: drivers.append("Leadership Confirmation")
+        
+        drags = []
+        if votes['flows'] == 'NEUTRAL': drags.append("Flows Neutral")
+        if votes['leadership'] in ('NEUTRAL', 'WEAK', 'NO_QUALIFIERS'): drags.append("Leadership Weak")
+        if any(v == 'DEGRADED' for v in validity.values()): drags.append("Degraded Data Inputs")
+
+        # 7. Top Line Summary (Spec 5.0)
+        driver_str = f"Regime {bias}" if bias != 'NEUTRAL' else "No directional driver"
+        escalation_str = ""
+        if action == 'NO_TRADE' and blocking_reason:
+            escalation_str = f"blocked by: {blocking_reason}"
+        elif "WATCHLIST" in action:
+            escalation_str = "watchlist only; secondary support insufficient"
+        elif "PAPER_ELIGIBLE" in action:
+            escalation_str = "promotion threshold met with alignment"
+        else:
+            escalation_str = "monitoring setup"
+
+        summary = f"{driver_str} supports {action.replace('_', ' ')}; {escalation_str}."
+        if votes['risk'] == 'BLOCKED':
+            summary = f"Action forced to NO TRADE: {blocking_reason}."
+
+        return {
+            'action': action,
+            'top_line_summary': summary,
+            'directional_confidence': round(float(directional_confidence), 4),
+            'action_confidence': round(float(action_confidence), 4),
+            'confidence': round(float(action_confidence), 4),
+            'validity_status': validity,
+            'directional_votes': votes,
+            'reasoning': drivers + drags,
+            'reason_buckets': {
+                'drivers': drivers,
+                'boosters': [f"Alignment Score: {alignment_score:.1f}x"],
+                'drags': drags,
+                'gates': [f"Risk: {votes['risk']}", f"Mode: {mode}"]
+            },
+            'confidence_calibration': {
+                'contributions': {
+                    'regime': round(float(regime_score * self.w_regime), 4),
+                    'flows': round(float(flows_score * self.w_flows), 4),
+                    'leadership': round(float(leadership_score * self.w_leadership), 4),
+                    'bonus': round(float(directional_confidence * (alignment_score - 1.0)), 4),
+                    'penalty': round(float(directional_confidence * alignment_score * (1.0 - (0.8 if any(v == 'DEGRADED' for v in validity.values()) else 0.5 if any(v == 'INVALID' for v in validity.values()) else 1.0))), 4) if any(v in ('DEGRADED', 'INVALID') for v in validity.values()) else 0.0
+                },
+                'watchlist_floor_met': directional_confidence >= self.watchlist_floor,
+                'promotion_threshold_met': action_confidence >= self.promotion_floor,
+                'alignment_bonus': round(float(alignment_score), 2),
+                'blocking_reason': blocking_reason
+            }
+        }

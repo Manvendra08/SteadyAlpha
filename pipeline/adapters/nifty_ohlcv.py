@@ -33,14 +33,14 @@ def fetch(config: dict = {}) -> FetchResult:
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=LOOKBACK_DAYS)
 
-    # ── Rung 1: Research360 (primary — no broker IP lock) ─────────────────
-    result = _try_research360()
+    # ── Rung 1: yfinance (Primary for History) ────────────────────────────
+    result = _try_yfinance(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
     if result and result.success:
         cache_write(DATASET_KEY, result)
         return result
 
-    # ── Rung 2: yfinance ──────────────────────────────────────────────────
-    result = _try_yfinance(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+    # ── Rung 2: Research360 (Secondary for Snapshot Only) ─────────────────
+    result = _try_research360()
     if result and result.success:
         cache_write(DATASET_KEY, result)
         return result

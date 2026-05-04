@@ -15,6 +15,7 @@ import DiagnosticsDrawer from '../components/DiagnosticsDrawer';
 import RawDataEvidenceDrawer from '../components/RawDataEvidenceDrawer';
 import { supabase } from '../lib/supabase';
 import { DashboardViewModel } from '../types/DashboardViewModel';
+import DashboardClient from '../components/DashboardClient';
 
 export const revalidate = 0;
 
@@ -115,33 +116,123 @@ function buildSourceRegistry(
   });
 }
 
-function buildValidationChecks(summary: any, vm: Partial<DashboardViewModel>, sourceRegistry: DashboardViewModel['diagnostics']['sourceRegistry']): DashboardViewModel['diagnostics']['validationChecks'] {
+function buildValidationChecks(summary: any, vm: DashboardViewModel, sourceRegistry: DashboardViewModel['diagnostics']['sourceRegistry']): DashboardViewModel['diagnostics']['validationChecks'] {
   const checks: DashboardViewModel['diagnostics']['validationChecks'] = [];
   
-  // 1. Critical coverage check
-  const criticalLoaded = sourceRegistry.filter(s => s.criticality === 'CRITICAL_FOR_DECISION' && s.tradingValid).length;
-  const criticalTotal = sourceRegistry.filter(s => s.criticality === 'CRITICAL_FOR_DECISION').length;
-  
+  // 1. Run Valid for Trading
+  const tradingValid = vm.tradingValidity === 'YES';
   checks.push({
-    label: 'Critical Dataset Coverage',
-    result: criticalLoaded === criticalTotal && criticalTotal > 0 ? 'PASS' : criticalLoaded > 0 ? 'WARN' : 'FAIL',
-    note: `${criticalLoaded}/${criticalTotal} critical feeds live`,
+    label: 'Run Valid for Trading',
+    result: tradingValid ? 'PASS' : 'FAIL',
+    note: tradingValid ? 'Full operational integrity' : 'Execution disabled',
   });
 
   // 2. Risk Circuit Breaker
-  const isHalted = summary?.risk?.status === 'HALTED';
+  const isHalted = summary?.risk?.status === 'HALTED' || vm.risk.mode === 'HALTED';
   checks.push({
-    label: 'Risk Circuit Breaker',
+    label: 'Risk circuit breaker state valid',
     result: isHalted ? 'FAIL' : 'PASS',
-    note: isHalted ? 'HALTED' : 'CLEAN',
+    note: isHalted ? 'Circuit breaker active' : 'Gate open',
   });
 
-  // 3. Advisor Confidence
-  const advisorConfidence = summary?.advisor?.confidence ?? 0;
+  // 3. Confidence range
+  const conf = vm.decision.confidencePct;
   checks.push({
-    label: 'Advisor Confidence Gate',
-    result: advisorConfidence > 0.7 ? 'PASS' : advisorConfidence > 0.4 ? 'WARN' : 'FAIL',
-    note: `${Math.round(advisorConfidence * 100)}% confidence`,
+    label: 'Confidence in 0–100 range',
+    result: (conf >= 0 && conf <= 100) ? 'PASS' : 'FAIL',
+    note: `${conf}% calculated`,
+  });
+
+  // 4. Decision label operational
+  const action = summary?.advisor?.action || 'NO_TRADE';
+  const isOperational = ['NO_TRADE', 'WATCHLIST_LONG', 'WATCHLIST_SHORT', 'PAPER_ELIGIBLE_LONG', 'PAPER_ELIGIBLE_SHORT'].some(s => action.startsWith(s.split('_')[0]));
+  checks.push({
+    label: 'Decision label is operational',
+    result: isOperational ? 'PASS' : 'WARN',
+    note: action,
+  });
+
+  // 5. Watchlist Floor Check
+  const dirConf = summary?.advisor?.directional_confidence ?? 0;
+  const isWatchlist = action.includes('WATCHLIST');
+  checks.push({
+    label: 'Watchlist floor alignment',
+    result: isWatchlist ? (dirConf >= 0.05 ? 'PASS' : 'FAIL') : 'PASS',
+    note: `DirConf: ${Math.round(dirConf * 100)}% (floor: 5%)`,
+  });
+
+  // 6. Paper Threshold Check
+  const actConf = summary?.advisor?.action_confidence ?? 0;
+  const isPaperEligible = action.includes('PAPER_ELIGIBLE');
+  checks.push({
+    label: 'Paper promotion alignment',
+    result: !isPaperEligible && actConf >= 0.18 ? 'WARN' : 'PASS',
+    note: `ActConf: ${Math.round(actConf * 100)}% (threshold: 18%)`,
+  });
+
+  // 7. Critical datasets
+  const criticalMissing = sourceRegistry.filter(s => s.criticality === 'CRITICAL_FOR_DECISION' && !s.tradingValid).length;
+  checks.push({
+    label: 'All critical datasets trading-valid',
+    result: criticalMissing === 0 ? 'PASS' : 'FAIL',
+    note: `${criticalMissing} critical feeds failed`,
+  });
+
+  return checks;
+}
+
+function buildConsistencyChecks(summary: any, vm: DashboardViewModel, sourceRegistry: DashboardViewModel['diagnostics']['sourceRegistry']): DashboardViewModel['diagnostics']['consistencyChecks'] {
+  const checks: DashboardViewModel['diagnostics']['consistencyChecks'] = [];
+
+  // 1. No VALID engine has missing critical dependency
+  const engines = [
+    { name: 'Regime', status: vm.regime.validityStatus, dep: 'nifty_ohlcv' },
+    { name: 'Flows', status: vm.flows.validityStatus, dep: 'fii_flows' },
+    { name: 'Leadership', status: vm.leadership.validityStatus, dep: 'universe_ohlcv' },
+  ];
+  const engineDepFail = engines.find(e => e.status === 'VALID' && sourceRegistry.find(s => s.datasetKey === e.dep && !s.tradingValid));
+  checks.push({
+    label: 'Engine dependency consistency',
+    result: engineDepFail ? 'FAIL' : 'PASS',
+    note: engineDepFail ? `${engineDepFail.name} valid despite dependency fail` : 'All valid engines have dependencies',
+  });
+
+  // 2. Paper promotion disabled unless final action is eligible
+  const isEligible = summary?.advisor?.action?.includes('PAPER_ELIGIBLE');
+  const canPromote = summary?.advisor?.confidence_calibration?.promotion_threshold_met;
+  checks.push({
+    label: 'Paper promotion eligibility',
+    result: isEligible === canPromote ? 'PASS' : 'FAIL',
+    note: isEligible ? 'Eligible for promotion' : 'Promotion locked',
+  });
+
+  // 3. Directional vote semantics
+  const regVote = vm.regime.directionalVote;
+  const isAligned = ['LONG', 'SHORT', 'NEUTRAL', 'WEAK'].includes(regVote);
+  checks.push({
+    label: 'Directional vote semantics',
+    result: isAligned ? 'PASS' : 'FAIL',
+    note: `Term: ${regVote}`,
+  });
+
+  // 4. Decision label matches action thresholds
+  const calib = summary?.advisor?.confidence_calibration;
+  const labelMatches = (summary?.advisor?.action?.includes('WATCHLIST') && calib?.watchlist_floor_met) || 
+                       (summary?.advisor?.action?.includes('PAPER_ELIGIBLE') && calib?.promotion_threshold_met) ||
+                       (summary?.advisor?.action === 'NO_TRADE');
+  checks.push({
+    label: 'Decision label vs Thresholds',
+    result: labelMatches ? 'PASS' : 'FAIL',
+    note: 'Action aligned with confidence floors',
+  });
+
+  // 5. No mock-only warnings on real-data run
+  const hasMocks = sourceRegistry.some(s => s.sourceType === 'MOCK');
+  const mockWarnings = vm.diagnostics.engineWarnings.filter(w => w.toLowerCase().includes('mock'));
+  checks.push({
+    label: 'Mock-warning consistency',
+    result: (hasMocks || mockWarnings.length === 0) ? 'PASS' : 'FAIL',
+    note: hasMocks ? 'Mocks present' : 'No mock contamination detected',
   });
 
   return checks;
@@ -300,12 +391,14 @@ export default async function Home() {
     state: regimeState,
     confidencePct: Math.round((summary?.regime?.trend_score ?? 0) * 100),
     trendScore: summary?.regime?.trend_score ?? 0,
-    adx: summary?.regime?.raw_inputs?.adx ?? 0,
+    adx: summary?.regime?.adx ?? 0,
     vix: summary?.regime?.vix_value ?? 0,
     vixPercentile: 50,
     breadthPct: summary?.regime?.breadth_pct ?? 0,
     hysteresisState: summary?.regime?.transition_reason === 'stable' ? 'CONFIRMED' : 'WAITING',
     engineStatus: regimeReady ? (vixIsMock || breadthIsMock ? 'SIMULATED' : 'READY') : 'FAILED',
+    validityStatus: (summary?.advisor?.validity_status?.regime || (regimeReady ? 'VALID' : 'INVALID')) as any,
+    directionalVote: (summary?.advisor?.directional_votes?.regime || 'NEUTRAL') as any,
     dependency: `Nifty OHLCV: ${getProv('nifty_ohlcv')?.sourceType ?? 'MISSING'}; VIX: ${vixProv?.sourceType ?? 'MISSING'}`,
     impact: regimeState === 'BULLISH' || regimeState === 'TREND_UP'
       ? 'Regime vote contributed LONG bias'
@@ -324,16 +417,20 @@ export default async function Home() {
   const flows: DashboardViewModel['flows'] = {
     bias: flowBias,
     fii5dNet: summary?.flows?.fii_5d_z ?? null,
+    fiiNetDaily: summary?.flows?.fii_net_daily ?? null,
     dii5dNet: summary?.flows?.dii_5d_z ?? null,
-    pcrOi: summary?.flows?.pcr_smooth ?? null,
+    diiNetDaily: summary?.flows?.dii_net_daily ?? null,
+    pcrOi: summary?.flows?.pcr_latest ?? summary?.flows?.pcr_smooth ?? 0.5,
     maxPain: summary?.flows?.max_pain ?? null,
     spotVsMaxPainPct: summary?.flows?.spot_vs_max_pain_pct ?? null,
     sectorAlignment: 'UNKNOWN',
     freshness: flowsAreMock ? 'FALLBACK' : 'FRESH',
     biasDrivers: summary?.flows
-      ? [`FII Z: ${summary.flows.fii_5d_z?.toFixed(2) ?? '—'}`, `PCR: ${summary.flows.pcr_smooth?.toFixed(2) ?? '—'}`, `MaxPain: ${summary.flows.max_pain ?? '—'}`]
+      ? [`FII Z: ${summary.flows.fii_5d_z?.toFixed(2) ?? '—'}`, `PCR: ${(summary.flows.pcr_latest ?? summary.flows.pcr_smooth)?.toFixed(2) ?? '—'}`, `MaxPain: ${summary.flows.max_pain ?? '—'}`]
       : [],
     engineStatus: summary?.flows ? (flowsAreMock ? 'SIMULATED' : 'READY') : 'FAILED',
+    validityStatus: (summary?.advisor?.validity_status?.flows || (summary?.flows ? 'VALID' : 'INVALID')) as any,
+    directionalVote: (summary?.advisor?.directional_votes?.flows || 'NEUTRAL') as any,
     dependency: `FII: ${getProv('fii_flows')?.sourceType ?? 'MISSING'}; PCR: ${getProv('pcr_oi')?.sourceType ?? 'MISSING'}`,
     impact: `Flow vote ${flowBias === 'NEUTRAL' ? 'neutral' : `${flowBias.toLowerCase()}`}${flowsAreMock ? ' — vote weakened by mock data' : ''}`,
     warning: flowsAreMock ? 'Flow inputs contain random mocks' : null,
@@ -363,19 +460,28 @@ export default async function Home() {
   })).sort((a, b) => a.score - b.score);
 
   const leadership: DashboardViewModel['leadership'] = {
-    status: leadCount > 0 ? 'READY' : universeSize > 0 ? 'SUPPRESSED' : 'DATA_MISSING',
+    status: leadCount > 0 ? 'READY' : universeSize > 0 ? 'COVERAGE_TOO_LOW' : 'DATA_MISSING',
     universeCoverage: universeSize > 0 ? universeSize / 200 : null,
     qualifiedLeaderCount: leadCount,
     qualifiedLaggardCount: laggardCount,
     leaders: leadersList,
     laggards: laggardsList,
     statusReason: leadCount > 0 ? 'Leaders found' : 'No qualified leaders after liquidity filter',
-    engineStatus: leadCount > 0 ? (uniIsMock ? 'SIMULATED' : 'READY') : universeSize > 0 ? 'SUPPRESSED' : 'FAILED',
+    engineStatus: leadCount > 0 ? (uniIsMock ? 'SIMULATED' : 'READY') : universeSize > 0 ? 'DEGRADED' : 'FAILED',
+    validityStatus: (summary?.advisor?.validity_status?.leadership || (universeSize > 0 ? 'VALID' : 'INVALID')) as any,
+    directionalVote: (summary?.advisor?.directional_votes?.leadership || 'NEUTRAL') as any,
     dependency: `Universe: ${uniProv?.sourceType ?? 'MISSING'} (${uniProv?.provider ?? '—'})`,
     impact: leadCount > 0
       ? `${leadCount} leaders / ${laggardCount} laggards identified`
-      : 'Leadership vote suppressed — no qualifying setups',
+      : 'Leadership neutral — no qualifying setups',
     warning: uniIsMock ? 'Universe data is mocked' : null,
+    thresholds: summary?.leadership?.thresholds ? {
+      minCoveragePct: summary.leadership.thresholds.min_coverage_pct,
+      minLeadersForVote: summary.leadership.thresholds.min_leaders_for_vote
+    } : {
+      minCoveragePct: 0.5,
+      minLeadersForVote: 1
+    },
   };
 
   // ── risk ─────────────────────────────────────────────────────────────────
@@ -393,6 +499,8 @@ export default async function Home() {
     triggerReason: circuitBreaker ? 'Circuit breaker active' : null,
     consecutiveLossDays: null,
     engineStatus: riskReady ? (circuitBreaker ? 'FAILED' : (eqIsMock ? 'SIMULATED' : 'READY')) : 'FAILED',
+    validityStatus: (summary?.advisor?.validity_status?.risk || (riskReady ? 'VALID' : 'INVALID')) as any,
+    directionalVote: (summary?.advisor?.directional_votes?.risk || 'PASS_EXECUTION') as any,
     dependency: `Equity: ${eqProv?.sourceType ?? 'MISSING'} (${eqProv?.provider ?? '—'})`,
     impact: circuitBreaker ? 'Circuit breaker TRIPPED — advisor forced HALT' : 'Risk gate PASS — position sizing active',
     warning: eqIsMock ? 'Equity data is mocked' : null,
@@ -412,14 +520,40 @@ export default async function Home() {
   }
 
   const decision: DashboardViewModel['decision'] = {
-    label: decisionLabelRaw as any,
+    label: (summary?.advisor?.action || 'NO_TRADE') as any,
+    topLineSummary: summary?.advisor?.top_line_summary,
     confidencePct: Math.round((summary?.advisor?.confidence ?? 0) * 100),
-    regimeGate: summary?.advisor?.components?.regime !== undefined ? 'PASS' : 'FAIL',
-    flowGate: summary?.advisor?.components?.flows !== undefined ? 'PASS' : 'FAIL',
-    leadershipGate: summary?.advisor?.components?.leadership !== undefined ? 'PASS' : 'FAIL',
-    riskGate: circuitBreaker ? 'FAIL' : 'PASS',
-    reasons: summary?.advisor?.score !== undefined ? [`Weighted score: ${Number(summary.advisor.score).toFixed(4)}`] : ['No advisor run data'],
-    conflicts: summary?.advisor?.conflict_detected ? ['Directional conflict between engines detected'] : [],
+    directionalConfidence: Math.round((summary?.advisor?.directional_confidence ?? 0) * 100),
+    actionConfidence: Math.round((summary?.advisor?.action_confidence ?? 0) * 100),
+    validityStatus: summary?.advisor?.validity_status || {
+      regime: 'VALID',
+      flows: 'VALID',
+      leadership: 'VALID',
+      risk: 'VALID'
+    },
+    directionalVotes: summary?.advisor?.directional_votes || {
+      regime: 'NEUTRAL',
+      flows: 'NEUTRAL',
+      leadership: 'NEUTRAL',
+      risk: 'PASS_EXECUTION'
+    },
+    reasons: summary?.advisor?.reasoning || [],
+    conflicts: summary?.advisor?.conflict_detected ? ['Signal conflict between engines detected'] : [],
+    drivers: summary?.advisor?.reason_buckets?.drivers || [],
+    boosters: summary?.advisor?.reason_buckets?.boosters || [],
+    drags: summary?.advisor?.reason_buckets?.drags || [],
+    gates: summary?.advisor?.reason_buckets?.gates || [],
+    confidenceCalibration: summary?.advisor?.confidence_calibration ? {
+      contributions: {
+        regime: summary.advisor.confidence_calibration.contributions?.regime ?? 0,
+        flows: summary.advisor.confidence_calibration.contributions?.flows ?? 0,
+        leadership: summary.advisor.confidence_calibration.contributions?.leadership ?? 0,
+        bonus: summary.advisor.confidence_calibration.contributions?.bonus ?? 0,
+        penalty: summary.advisor.confidence_calibration.contributions?.penalty ?? 0,
+      },
+      watchlistFloorMet: summary.advisor.confidence_calibration.watchlist_floor_met ?? false,
+      promotionThresholdMet: summary.advisor.confidence_calibration.promotion_threshold_met ?? false,
+    } : undefined,
   };
 
   // ── paper actions ─────────────────────────────────────────────────────────
@@ -438,9 +572,20 @@ export default async function Home() {
   }));
 
   // ── diagnostics ───────────────────────────────────────────────────────────
-  const tempVm = { decision: decision as any, risk: risk as any };
-  const validationChecks = buildValidationChecks(summary, tempVm, sourceRegistry);
-  const engineWarnings = buildEngineWarnings(summary);
+  // Create a base VM for the builders
+  const baseVm: any = {
+    tradingValidity,
+    regime,
+    flows,
+    leadership,
+    risk,
+    decision,
+    diagnostics: { engineWarnings: buildEngineWarnings(summary) }
+  };
+  
+  const validationChecks = buildValidationChecks(summary, baseVm as DashboardViewModel, sourceRegistry);
+  const consistencyChecks = buildConsistencyChecks(summary, baseVm as DashboardViewModel, sourceRegistry);
+  const engineWarnings = baseVm.diagnostics.engineWarnings;
 
   const diagnostics: DashboardViewModel['diagnostics'] = {
     runId: runId ?? 'unknown',
@@ -449,6 +594,7 @@ export default async function Home() {
     triggerType: latestRun?.trigger_type ?? 'SCHEDULED',
     sourceRegistry,
     validationChecks,
+    consistencyChecks,
     engineWarnings,
     rawDataPreviews: summary?.meta?.raw_data_previews ?? [],
   };
@@ -497,94 +643,17 @@ export default async function Home() {
     leadership,
     risk,
     decision,
-    changes: {
-      material: false,
-      items: [],
-      asOfTs: new Date().toISOString(),
-    },
+    changes,
     paperActions,
     paperActionEmptyReason: null,
     diagnostics,
   };
 
   return (
-    <main className="min-h-screen bg-bg-primary text-text-secondary">
-      <SystemStatusBar
-        pipelineStatus={vm.pipelineStatus}
-        tradingValidity={vm.tradingValidity}
-        mode={vm.operatingMode}
-        riskMode={vm.riskMode}
-        lastSuccessTs={vm.lastSuccessTs}
-        dataTrustScore={vm.dataTrustScore}
-        tradingReadinessScore={vm.tradingReadinessScore}
-        invalidReasons={vm.invalidReasons}
-      />
-
-      <div className="max-w-[1280px] mx-auto px-4 md:px-6 py-6 space-y-5">
-        {/* Title row */}
-        <div className="flex items-center justify-between border-b border-border-theme pb-2 mb-4">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-black text-text-primary tracking-tighter uppercase">Console</h1>
-            <span className="h-4 w-[1px] bg-border-theme hidden sm:block"></span>
-            <span className="text-text-muted text-xs hidden sm:block font-mono">Stage 2 — Paper Execution</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <Link href="/diagnostics" className="text-xs text-blue-400 hover:text-blue-300 transition-colors font-bold uppercase tracking-wider flex items-center gap-1">
-              <span>Engine Diagnostics</span>
-              <span className="text-[10px]">↗</span>
-            </Link>
-          </div>
-        </div>
-
-        {/* Decision panel */}
-        <DecisionPanel {...vm.decision} />
-
-        {/* Engine cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <RegimeCard {...vm.regime} />
-          <FlowsCard {...vm.flows} />
-          <LeadershipCard {...vm.leadership} />
-          <RiskCard {...vm.risk} />
-        </div>
-
-        {/* State changes */}
-        <ChangesPanel {...vm.changes} />
-
-        {/* Paper actions */}
-        <div className="relative">
-          <div className="absolute -top-4 -right-2 opacity-10 pointer-events-none select-none hidden md:block">
-             <img src="/logo-dark.png" alt="" className="h-24 w-auto grayscale" />
-          </div>
-          <PaperActionsTable
-            actions={vm.paperActions}
-            operatingMode={vm.operatingMode}
-            emptyReason={vm.paperActionEmptyReason}
-            decisionLabel={vm.decision.label}
-            riskMode={vm.riskMode}
-          />
-        </div>
-
-        {/* Paper Trades */}
-        <div className="grid grid-cols-1 gap-5 mt-5">
-          <OpenPaperTradesTable trades={openTrades} />
-          <ClosedPaperTradesTable trades={closedTrades} />
-        </div>
-
-        {/* Segmented Performance */}
-        <SegmentedPerformance trades={closedTrades} />
-
-        {/* Diagnostics drawer */}
-        <DiagnosticsDrawer diagnostics={vm.diagnostics} />
-
-        {/* Raw data evidence drawer */}
-        <RawDataEvidenceDrawer previews={vm.diagnostics.rawDataPreviews} />
-
-        {/* Brand Banner */}
-        <div className="w-full bg-bg-card border border-border-theme rounded-2xl overflow-hidden shadow-xl mt-4">
-          <img src="/banner.png" alt="SteadyAlpha Systematic Market Intelligence" className="w-full h-auto object-cover max-h-[160px] opacity-90 hover:opacity-100 transition-opacity" />
-        </div>
-
-      </div>
-    </main>
+    <DashboardClient 
+      initialVm={vm} 
+      initialOpenTrades={openTrades} 
+      initialClosedTrades={closedTrades} 
+    />
   );
 }

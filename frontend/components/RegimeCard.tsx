@@ -20,7 +20,7 @@ function EngineStatusBadge({ status }: { status: EngineStatus }) {
 
 export default function RegimeCard({
   state, confidencePct, trendScore, adx, vix, vixPercentile, breadthPct,
-  hysteresisState, engineStatus, dependency, impact, warning,
+  hysteresisState, engineStatus, validityStatus, directionalVote, dependency, impact, warning,
 }: DashboardViewModel['regime']) {
   const isFailed = engineStatus === 'FAILED' || !state;
   
@@ -42,13 +42,21 @@ export default function RegimeCard({
           </div>
           <h2 className="text-text-primary text-[11px] font-black uppercase tracking-[0.1em]">Regime</h2>
         </div>
-        <EngineStatusBadge status={engineStatus} />
+        <div className="flex items-center gap-2">
+           <EngineStatusBadge status={engineStatus} />
+           <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+             validityStatus === 'VALID' ? 'border-green-400/30 text-green-400' : 'border-amber-400/30 text-amber-400'
+           }`}>{validityStatus}</span>
+        </div>
       </div>
 
       {/* State hero - Visual Priority */}
       <div className="flex flex-col">
         <div className={`text-2xl font-black tracking-tighter leading-tight ${stateColor}`}>
           {isFailed ? 'NO DATA' : state}
+        </div>
+        <div className="text-[10px] font-black uppercase tracking-widest text-text-muted opacity-60 mt-0.5">
+          Signal Vote: <span className={stateColor}>{directionalVote}</span>
         </div>
         <div className="flex items-center gap-2 mt-1">
           <div className="h-1 flex-1 bg-bg-elevated rounded-full overflow-hidden">

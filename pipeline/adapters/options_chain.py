@@ -25,21 +25,21 @@ SYMBOL  = "NIFTY"
 
 def fetch_pcr() -> FetchResult:
     """PCR OI source ladder."""
-    # ── Rung 1: Research360 (primary — no broker IP lock) ─────────────────
-    logger.info("[pcr] Attempting Rung 1: Research360...")
-    result = _try_research360_pcr()
-    if result and result.success:
-        cache_write(PCR_KEY, result)
-        return result
-
-    # ── Rung 2: Research360 DOM Scraper (as requested) ────────────────────
-    logger.info("[pcr] Attempting Rung 2: Research360 DOM Scraper...")
+    # ── Rung 1: Research360 DOM Scraper (primary — provides PCR, Max Pain, Spot) ──
+    logger.info("[pcr] Attempting Rung 1: Research360 DOM Scraper...")
     result = _try_r360_dom_pcr()
     if result and result.success:
         cache_write(PCR_KEY, result)
         return result
 
-    # ── Rung 3: Stealth NSE API (REAL fallback) ───────────────────────────
+    # ── Rung 2: Research360 Public API (Scalar fallback) ──────────────────
+    logger.info("[pcr] Attempting Rung 2: Research360 Public API...")
+    result = _try_research360_pcr()
+    if result and result.success:
+        cache_write(PCR_KEY, result)
+        return result
+
+    # ── Rung 3: Stealth NSE API (Secondary Fallback) ──────────────────────
     logger.info("[pcr] Attempting Rung 3: Stealth NSE...")
     result = _try_stealth_nse_pcr()
     if result and result.success:

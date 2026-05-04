@@ -146,15 +146,19 @@ class RiskEngine:
         cb_state = self.check_circuit_breaker(equity_curve)
         
         # 3. Construct Output
+        status = 'HALTED' if cb_state['active'] or portfolio_risk['breach'] else 'ACTIVE'
+        
         risk_state = {
             'portfolio_risk': portfolio_risk,
             'circuit_breaker': cb_state,
+            'validity_status': 'VALID',
+            'directional_vote': 'BLOCKED' if status == 'HALTED' else 'PASS_EXECUTION',
             'limits': {
                 'max_portfolio_risk_pct': self.max_portfolio_risk * 100,
                 'max_single_name_risk_pct': self.max_single_name_risk * 100,
                 'base_risk_pct': self.base_risk_pct * 100
             },
-            'status': 'HALTED' if cb_state['active'] or portfolio_risk['breach'] else 'ACTIVE'
+            'status': status
         }
         
         return risk_state

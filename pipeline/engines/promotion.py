@@ -29,7 +29,10 @@ def evaluate_promotion(
     min_confidence = float(paper_config.get("min_confidence", 60.0))
     require_risk_halt_false = bool(paper_config.get("require_risk_halt_false", True))
 
-    if recommendation not in ("LONG", "SHORT"):
+    is_long = "LONG" in recommendation or "PAPER_ELIGIBLE" in recommendation
+    is_short = "SHORT" in recommendation
+    
+    if not (is_long or is_short):
         return PromotionDecision(
             status="rejected",
             requested_qty=0,
