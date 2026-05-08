@@ -9,7 +9,7 @@ Build v0.6 simulation-first: implement signal-quality, options analysis, dashboa
 - Normalize persistence around `run_registry.run_id`; stop using the legacy `runs.id` path. Add a compatibility migration instead of destructive schema changes.
 - Add canonical engine payloads: `data_quality`, `options_analysis`, `setup_quality`, `hourly_alerts`, `paper_options_orders`, `position_lifecycle`, `journal_review`.
 - Add config sections from v0.6: `product`, `trading_mode`, `data_policy`, `setup_quality`, `options_analysis`, `options_paper_selling`, `hourly_monitor`.
-- Replace `pd.np` mock generation with `numpy` and keep mock data deterministic via seeded fixtures.
+- Replace `pd.np` mock generation with `np` and keep mock data deterministic via seeded fixtures.
 
 ### Engines
 - Add `DataQualityEngine`: freshness, coverage, source legality level, option quote sanity, bid/ask sanity, Greeks/margin availability.

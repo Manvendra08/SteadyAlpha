@@ -215,11 +215,9 @@ Secrets are configured at repo level:
 ```python
 # Example from main.py:
 dates = pd.date_range(end=datetime.now(timezone.utc), periods=300, freq='B')
-close = pd.Series(100 + pd.np.random.randn(300).cumsum(), index=dates)
+close = pd.Series(100 + np.random.randn(300).cumsum(), index=dates)
 # All data is synthetic, suitable for validation/demo
 ```
-
-**Known Issue:** `pd.np.random` is deprecated. Use `np.random` instead (fix queued for next refactor).
 
 **Migration Path:**
 1. Replace `load_data()` with real market data API (e.g., Alpha Vantage, yfinance)
@@ -352,7 +350,7 @@ import pandas as pd
 
 engine = RegimeEngine()
 dates = pd.date_range(periods=300, freq='B')
-close = pd.Series(100 + pd.np.random.randn(300).cumsum(), index=dates)
+close = pd.Series(100 + np.random.randn(300).cumsum(), index=dates)
 
 result = engine.run(close=close, vix=15.0, breadth_pct=0.7, previous_state="BULLISH", days_in_state=5)
 print(result)
